@@ -1,0 +1,17 @@
+# PlatformIO
+.pio/
+build/
+.vscode/
+.kilo/
+
+# IDE
+.idea/
+*.swp
+*.swo
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Dependencies
+node_modules/
