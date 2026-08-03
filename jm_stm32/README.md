@@ -95,11 +95,6 @@ if (ret == 0) {
 
 ### 原始串口发送
 
-```c
-uint8_t raw[] = {0x01, 0x02, 0x03};
-jm_serial_write(raw, sizeof(raw));
-```
-
 ### UART RX ISR（中断模式，可选）
 
 如果使用中断接收，依然可以保留 ISR 方式：

@@ -194,7 +194,6 @@ bool jm_stm32_uart_push_byte(uint8_t byte);
 void jm_stm32_uart_rx_byte(uint8_t byte);
 
 int jm_serial_read(void *huart);
-int jm_serial_write(const uint8_t *data, uint16_t len);
 
 int jm_stm32_send_uid();
 int jm_stm32_send_wifi_cfg(const char *ssid, const char *pwd);

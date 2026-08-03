@@ -811,7 +811,9 @@ static int jm_send_serial_packet(uint16_t subtype, uint16_t msg_id, const uint8_
         g_ctx.config->uart_send(payload, payload_len);
     }
 
-    JM_LOG_D("roOP"); 
+    jm_buf_release(buf);
+
+    //JM_LOG_D("roOP"); 
 
     return JM_SUCCESS;
 }
@@ -972,13 +974,6 @@ int jm_serial_read(void *huart)
     (void)huart;
     return -1;
 #endif
-}
-
-int jm_serial_write(const uint8_t *data, uint16_t len)
-{
-    if (!g_ctx.initialized || !g_ctx.config->uart_send) return -1;
-    g_ctx.config->uart_send(data, len);
-    return 0;
 }
 
 #if JM_STM32_LOG_ENABLE
