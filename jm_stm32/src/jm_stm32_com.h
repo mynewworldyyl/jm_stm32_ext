@@ -7,7 +7,12 @@
 extern "C" {
 #endif
 
-void jm_gpio_init(void);
+ void jm_gpio_init(void);
+
+
+#if JM_STM32_TESTEVENT_ENABLE==1
+    void jm_test_event_init(void);
+#endif
 
 #ifdef __cplusplus
 }

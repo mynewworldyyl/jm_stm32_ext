@@ -84,5 +84,6 @@
 #define JM_BLEMOUSE_ENABLE 0
 #endif
 
+#define JM_GPIO_CTRL_ENABLE 1
 
 #endif //JM_SENSOR_CFG_H_

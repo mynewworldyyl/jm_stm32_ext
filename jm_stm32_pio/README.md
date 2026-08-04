@@ -341,10 +341,6 @@ STM32 端提供独立的日志输出功能，通过 USART2（仅 TX）输出，�
 
 在 `platformio.ini` 中启用日志宏：
 
-```ini
-build_flags =
-    -DJM_STM32_LOG_ENABLE=1
-```
 
 开启后，`jm_stm32` 库会初始化 USART2（PA2），日志输出不会占用与 ESP8266 通信的 USART1。
 
@@ -362,8 +358,6 @@ JM_LOG("no newline");
 // 输出单个字符
 JM_LOG('c');
 ```
-
-当 `JM_STM32_LOG_ENABLE=0` 时，所有日志宏编译为 0 开销。
 
 #### 8.1.3 日志接线
 

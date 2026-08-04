@@ -123,7 +123,7 @@ int main(void)
     SystemClock_Config();
     MX_USART1_UART_Init();
 
-#if JM_STM32_LOG_ENABLE
+#if JM_LOG_DEBUG_ENABLE || JM_LOG_ERROR_ENABLE
     MX_USART2_UART_Init();
 #endif
 
@@ -172,7 +172,7 @@ int main(void)
     SysTick_Config(72000);
     uart_init();
 
-#if JM_STM32_LOG_ENABLE
+#if JM_LOG_DEBUG_ENABLE || JM_LOG_ERROR_ENABLE
     log_uart_init();
 #endif
 

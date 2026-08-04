@@ -112,15 +112,25 @@ static void adc_init_once(void) {
     if (g_gpio_state.adc_initialized) return;
 
     RCC->APB2ENR |= RCC_APB2ENR_ADC1EN;
-    RCC->CFGR &= ~RCC_CFGR_ADCPRE;  // ADC prescaler = 2 (72MHz/6 = 12MHz, but max is 14MHz)
+    RCC->CFGR = (RCC->CFGR & ~RCC_CFGR_ADCPRE) | (2 << 14);
 
     ADC1->CR2 = 0;
+    for (volatile int i = 0; i < 1000; i++);
     ADC1->CR1 = 0;
-    ADC1->SQR1 = 0;  // 1 conversion
-    ADC1->SMPR2 = 0;  // 1.5 cycles sample time (fastest)
+    ADC1->SQR1 = 0;
+    ADC1->SMPR2 = 0;
 
     ADC1->CR2 |= ADC_CR2_ADON;
-    for (volatile int i = 0; i < 1000; i++);
+    for (volatile int i = 0; i < 72000; i++);
+
+    ADC1->CR2 |= ADC_CR2_RSTCAL;
+    for (volatile int i = 0; i < 10000 && (ADC1->CR2 & ADC_CR2_RSTCAL); i++);
+
+    ADC1->CR2 |= ADC_CR2_CAL;
+    for (volatile int i = 0; i < 10000 && (ADC1->CR2 & ADC_CR2_CAL); i++);
+
+    ADC1->CR2 |= ADC_CR2_ADON;
+    for (volatile int i = 0; i < 72000; i++);
 
     g_gpio_state.adc_initialized = 1;
 }
@@ -130,9 +140,14 @@ static uint16_t adc_read_channel(uint8_t channel) {
 
     adc_init_once();
 
+    ADC1->SR = 0;
     ADC1->SQR3 = channel;
     ADC1->CR2 |= ADC_CR2_SWSTART;
-    while (!(ADC1->SR & ADC_SR_EOC));
+
+    int timeout = 50000;
+    while (!(ADC1->SR & ADC_SR_EOC)) {
+        if (--timeout <= 0) break;
+    }
     return (uint16_t)(ADC1->DR & 0xFFF);
 }
 
@@ -164,28 +179,70 @@ static void pwm_init_pin(uint32_t gpioNo) {
 }
 
 static void pwm_set_duty(uint32_t gpioNo, uint32_t value) {
-    if (gpioNo >= 4) return;  // Only PA0-PA3 supported (TIM2 CH1-CH4)
+    if ((gpioNo >= 4 && gpioNo <= 5) || gpioNo >= 8) return;
 
-    static int tim2_initialized = 0;
-    if (!tim2_initialized) {
-        RCC->APB1ENR |= RCC_APB1ENR_TIM2EN;
-        TIM2->CR1 = 0;
-        TIM2->PSC = 71;   // 72MHz / 72 = 1MHz
-        TIM2->ARR = 1000; // 1kHz PWM frequency
-        TIM2->CCMR1 = 0;
-        TIM2->CCMR2 = 0;
-        TIM2->CCER = 0;
-        TIM2->CR1 |= TIM_CR1_CEN;
-        tim2_initialized = 1;
-    }
+    uint32_t ccr = (value * 1000) / 255;
+    if (ccr > 1000) ccr = 1000;
 
-    uint32_t ccr = value > 1000 ? 1000 : value;
-    switch (gpioNo) {
-        case 0: TIM2->CCR1 = ccr; TIM2->CCER |= TIM_CCER_CC1E; break;
-        case 1: TIM2->CCR2 = ccr; TIM2->CCER |= TIM_CCER_CC2E; break;
-        case 2: TIM2->CCR3 = ccr; TIM2->CCER |= TIM_CCER_CC3E; break;
-        case 3: TIM2->CCR4 = ccr; TIM2->CCER |= TIM_CCER_CC4E; break;
-        default: break;
+    if (gpioNo <= 3) {
+        static int tim2_initialized = 0;
+        if (!tim2_initialized) {
+            RCC->APB1ENR |= RCC_APB1ENR_TIM2EN;
+            TIM2->CR1 = 0;
+            TIM2->PSC = 71;
+            TIM2->ARR = 1000;
+            TIM2->CCMR1 = 0;
+            TIM2->CCMR2 = 0;
+            TIM2->CCER = 0;
+            TIM2->CR1 |= TIM_CR1_CEN;
+            tim2_initialized = 1;
+        }
+        switch (gpioNo) {
+            case 0:
+                TIM2->CCR1 = ccr;
+                TIM2->CCMR1 |= (0x6 << 4) | (1 << 3);
+                TIM2->CCER |= TIM_CCER_CC1E;
+                break;
+            case 1:
+                TIM2->CCR2 = ccr;
+                TIM2->CCMR1 |= (0x6 << 12) | (1 << 11);
+                TIM2->CCER |= TIM_CCER_CC2E;
+                break;
+            case 2:
+                TIM2->CCR3 = ccr;
+                TIM2->CCMR2 |= (0x6 << 4) | (1 << 3);
+                TIM2->CCER |= TIM_CCER_CC3E;
+                break;
+            case 3:
+                TIM2->CCR4 = ccr;
+                TIM2->CCMR2 |= (0x6 << 12) | (1 << 11);
+                TIM2->CCER |= TIM_CCER_CC4E;
+                break;
+        }
+    } else {
+        static int tim3_initialized = 0;
+        if (!tim3_initialized) {
+            RCC->APB1ENR |= RCC_APB1ENR_TIM3EN;
+            TIM3->CR1 = 0;
+            TIM3->PSC = 71;
+            TIM3->ARR = 1000;
+            TIM3->CCMR1 = 0;
+            TIM3->CCER = 0;
+            TIM3->CR1 |= TIM_CR1_CEN;
+            tim3_initialized = 1;
+        }
+        switch (gpioNo) {
+            case 6:
+                TIM3->CCR1 = ccr;
+                TIM3->CCMR1 |= (0x6 << 4) | (1 << 3);
+                TIM3->CCER |= TIM_CCER_CC1E;
+                break;
+            case 7:
+                TIM3->CCR2 = ccr;
+                TIM3->CCMR1 |= (0x6 << 12) | (1 << 11);
+                TIM3->CCER |= TIM_CCER_CC2E;
+                break;
+        }
     }
 }
 
@@ -214,7 +271,7 @@ jm_emap_t *ctrl_remote_ctrlGpio(jm_emap_t *ps) {
         return h;
     }
 
-     JM_LOG_D("ctrlGpio op=%d",op);
+     JM_LOG_D("ctrlGpio op=%d gpioNo=%d",op,gpioNo);
 
     switch (op) {
         case 0: {
@@ -234,24 +291,56 @@ jm_emap_t *ctrl_remote_ctrlGpio(jm_emap_t *ps) {
             break;
         }
         case 3: {
+            JM_LOG_D("3 gpioNo=%d",gpioNo);
             gpio_set_output(gpioNo);
             port->ODR ^= pin;
             break;
         }
         case 8: {
+            JM_LOG_D("gpioNo=%d",gpioNo);
             if (gpioNo >= 8) {
+                 JM_LOG_D("tooB8=%d",gpioNo);
                 jm_emap_putInt(h, "code", 3, false);
                 jm_emap_putStr(h, "msg", "ADC only PA0-PA7", false, false);
                 break;
             }
+            gpio_set_input(gpioNo);
+            uint8_t pin_no = 0;
+            for (int i = 0; i < 16; i++) {
+                if (gpio_no_to_pin(gpioNo) & (1 << i)) {
+                    pin_no = i;
+                    break;
+                }
+            }
+            if (pin_no < 8) {
+                port->CRL &= ~(0xF << (pin_no * 4));
+            } else {
+                port->CRH &= ~(0xF << ((pin_no - 8) * 4));
+            }
+            if (gpioNo <= 3) {
+                switch (gpioNo) {
+                    case 0: TIM2->CCER &= ~TIM_CCER_CC1E; break;
+                    case 1: TIM2->CCER &= ~TIM_CCER_CC2E; break;
+                    case 2: TIM2->CCER &= ~TIM_CCER_CC3E; break;
+                    case 3: TIM2->CCER &= ~TIM_CCER_CC4E; break;
+                }
+            } else {
+                switch (gpioNo) {
+                    case 6: TIM3->CCER &= ~TIM_CCER_CC1E; break;
+                    case 7: TIM3->CCER &= ~TIM_CCER_CC2E; break;
+                }
+            }
+            JM_LOG_D("RB=%d",gpioNo);
             uint16_t v = adc_read_channel((uint8_t)gpioNo);
+             JM_LOG_D("RR=%d",v);
             jm_emap_putInt(h, "v", v, false);
+            JM_LOG_D("RRE");
             break;
         }
         case 9: {
-            if (gpioNo >= 4) {
+            if ((gpioNo >= 4 && gpioNo <= 5) || gpioNo >= 8) {
                 jm_emap_putInt(h, "code", 3, false);
-                jm_emap_putStr(h, "msg", "PWM only PA0-PA3", false, false);
+                jm_emap_putStr(h, "msg", "PWM only PA0-PA3, PA6-PA7", false, false);
                 break;
             }
             pwm_init_pin(gpioNo);

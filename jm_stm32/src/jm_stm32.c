@@ -11,6 +11,11 @@
 
 #define JM_RX_RING_SIZE 256
 
+#if JM_STM32_EVENT_ENABLE
+static void jm_stm32_runEvent(void);
+#endif
+static int jm_send_serial_packet(uint16_t subtype, uint16_t msg_id, const uint8_t *payload, uint16_t payload_len);
+
 typedef struct {
     uint8_t buf[JM_RX_RING_SIZE];
     volatile uint16_t head;
@@ -39,6 +44,243 @@ static jm_rx_ring_t g_rx_ring;
 
 static uint8_t REQ_ID = 1;
 
+
+//引脚中断
+#if JM_STM32_INTERRUPT_ENABLE
+
+#define JM_STM32_TRIGGER_RISING  1
+#define JM_STM32_TRIGGER_FALLING 2
+#define JM_STM32_TRIGGER_CHANGE  3
+
+#define JM_STM32_MAX_PIN_INTERRUPTS 16
+
+#define JM_STM32_DEBOUNCE_MS    70
+
+typedef struct {
+    uint16_t pin;
+    uint8_t triggerType;
+    bool active;
+    uint32_t last_irq_time;
+} jm_pin_interrupt_t;
+
+static jm_pin_interrupt_t g_pinInterrupts[JM_STM32_MAX_PIN_INTERRUPTS] = {0};
+
+static GPIO_TypeDef *jm_stm32_gpioNo_to_port(uint32_t gpioNo) {
+    if (gpioNo < 16) return GPIOA;
+    else if (gpioNo < 32) return GPIOB;
+    return NULL;
+}
+
+static uint16_t jm_stm32_gpioNo_to_pin(uint32_t gpioNo) {
+    if (gpioNo < 16) return (uint16_t)(1 << gpioNo);
+    else if (gpioNo < 32) return (uint16_t)(1 << (gpioNo - 16));
+    return 0;
+}
+
+static bool jm_stm32_registerPinInterrupt(uint16_t gpioNo, uint8_t triggerType) {
+    if (gpioNo >= 32) return false;
+    GPIO_TypeDef *port = jm_stm32_gpioNo_to_port(gpioNo);
+    uint16_t pinMask = jm_stm32_gpioNo_to_pin(gpioNo);
+    uint8_t extiLine = (uint8_t)(gpioNo & 0x0F);
+    if (!port || !pinMask) return false;
+
+    RCC->APB2ENR |= RCC_APB2ENR_AFIOEN;
+
+    if (port == GPIOA) RCC->APB2ENR |= RCC_APB2ENR_IOPAEN;
+    else if (port == GPIOB) RCC->APB2ENR |= RCC_APB2ENR_IOPBEN;
+    else if (port == GPIOC) RCC->APB2ENR |= RCC_APB2ENR_IOPCEN;
+
+    uint32_t portSource = (port == GPIOA) ? 0 :
+                          (port == GPIOB) ? 1 :
+                          (port == GPIOC) ? 2 : 3;
+    uint32_t extiReg = extiLine / 4;
+    uint32_t extiShift = (extiLine % 4) * 4;
+    AFIO->EXTICR[extiReg] = (AFIO->EXTICR[extiReg] & ~(0xFUL << extiShift)) | (portSource << extiShift);
+
+    EXTI->IMR |= (1UL << extiLine);
+    if (triggerType == JM_STM32_TRIGGER_RISING) {
+        EXTI->RTSR |= (1UL << extiLine);
+        EXTI->FTSR &= ~(1UL << extiLine);
+    } else if (triggerType == JM_STM32_TRIGGER_FALLING) {
+        EXTI->RTSR &= ~(1UL << extiLine);
+        EXTI->FTSR |= (1UL << extiLine);
+    } else {
+        EXTI->RTSR |= (1UL << extiLine);
+        EXTI->FTSR |= (1UL << extiLine);
+    }
+
+    IRQn_Type irqn;
+    if (extiLine <= 4) {
+        irqn = (IRQn_Type)(EXTI0_IRQn + extiLine);
+    } else if (extiLine <= 9) {
+        irqn = EXTI9_5_IRQn;
+    } else {
+        irqn = EXTI15_10_IRQn;
+    }
+    NVIC_EnableIRQ(irqn);
+
+    for (int i = 0; i < JM_STM32_MAX_PIN_INTERRUPTS; i++) {
+        if (!g_pinInterrupts[i].active) {
+            g_pinInterrupts[i].pin = gpioNo;
+            g_pinInterrupts[i].triggerType = triggerType;
+            g_pinInterrupts[i].active = true;
+            break;
+        }
+    }
+
+    return true;
+}
+
+static bool jm_stm32_unregisterPinInterrupt(uint16_t gpioNo) {
+    if (gpioNo >= 32) return false;
+    uint8_t extiLine = (uint8_t)(gpioNo & 0x0F);
+
+    EXTI->IMR &= ~(1UL << extiLine);
+    EXTI->RTSR &= ~(1UL << extiLine);
+    EXTI->FTSR &= ~(1UL << extiLine);
+    EXTI->PR = (1UL << extiLine);
+
+    IRQn_Type irqn;
+    if (extiLine <= 4) {
+        irqn = (IRQn_Type)(EXTI0_IRQn + extiLine);
+    } else if (extiLine <= 9) {
+        irqn = EXTI9_5_IRQn;
+    } else {
+        irqn = EXTI15_10_IRQn;
+    }
+    NVIC_DisableIRQ(irqn);
+
+    for (int i = 0; i < JM_STM32_MAX_PIN_INTERRUPTS; i++) {
+        if (g_pinInterrupts[i].active && g_pinInterrupts[i].pin == gpioNo) {
+            g_pinInterrupts[i].active = false;
+            break;
+        }
+    }
+
+    return true;
+}
+
+//有引脚中断发送，将事件上行到网卡分发出去
+int jm_stm32_pinInterrupt(const uint16_t pin) {
+    jm_buf_t *hbuf = jm_buf_create(5);
+	if(hbuf == NULL) {
+		JM_LOG_E("InteMN");
+		return JM_ERR_NOT_READY;
+	}
+ 	jm_buf_put_u16(hbuf, pin);
+
+	jm_send_serial_packet(JM_TASK_APP_PROXY_NETCARD_INTERRUPT, 0, (uint8_t*) hbuf->data, jm_buf_readable_len(hbuf));
+
+	jm_buf_release(hbuf);
+
+	JM_LOG_D("transInte E");
+	return true;	
+}
+
+void EXTI0_IRQHandler(void) {
+    if (EXTI->PR & (1UL << 0)) {
+        EXTI->PR = (1UL << 0);
+        uint32_t now = g_ctx.config->get_sys_time_ms();
+        for (int i = 0; i < JM_STM32_MAX_PIN_INTERRUPTS; i++) {
+            if (g_pinInterrupts[i].active && (g_pinInterrupts[i].pin & 0x0F) == 0) {
+                if (now - g_pinInterrupts[i].last_irq_time < JM_STM32_DEBOUNCE_MS) continue;
+                g_pinInterrupts[i].last_irq_time = now;
+                jm_stm32_pinInterrupt(g_pinInterrupts[i].pin);
+            }
+        }
+    }
+}
+
+void EXTI1_IRQHandler(void) {
+    if (EXTI->PR & (1UL << 1)) {
+        EXTI->PR = (1UL << 1);
+        uint32_t now = g_ctx.config->get_sys_time_ms();
+        for (int i = 0; i < JM_STM32_MAX_PIN_INTERRUPTS; i++) {
+            if (g_pinInterrupts[i].active && (g_pinInterrupts[i].pin & 0x0F) == 1) {
+                if (now - g_pinInterrupts[i].last_irq_time < JM_STM32_DEBOUNCE_MS) continue;
+                g_pinInterrupts[i].last_irq_time = now;
+                jm_stm32_pinInterrupt(g_pinInterrupts[i].pin);
+            }
+        }
+    }
+}
+
+void EXTI2_IRQHandler(void) {
+    if (EXTI->PR & (1UL << 2)) {
+        EXTI->PR = (1UL << 2);
+        uint32_t now = g_ctx.config->get_sys_time_ms();
+        for (int i = 0; i < JM_STM32_MAX_PIN_INTERRUPTS; i++) {
+            if (g_pinInterrupts[i].active && (g_pinInterrupts[i].pin & 0x0F) == 2) {
+                if (now - g_pinInterrupts[i].last_irq_time < JM_STM32_DEBOUNCE_MS) continue;
+                g_pinInterrupts[i].last_irq_time = now;
+                jm_stm32_pinInterrupt(g_pinInterrupts[i].pin);
+            }
+        }
+    }
+}
+
+void EXTI3_IRQHandler(void) {
+    if (EXTI->PR & (1UL << 3)) {
+        EXTI->PR = (1UL << 3);
+        uint32_t now = g_ctx.config->get_sys_time_ms();
+        for (int i = 0; i < JM_STM32_MAX_PIN_INTERRUPTS; i++) {
+            if (g_pinInterrupts[i].active && (g_pinInterrupts[i].pin & 0x0F) == 3) {
+                if (now - g_pinInterrupts[i].last_irq_time < JM_STM32_DEBOUNCE_MS) continue;
+                g_pinInterrupts[i].last_irq_time = now;
+                jm_stm32_pinInterrupt(g_pinInterrupts[i].pin);
+            }
+        }
+    }
+}
+
+void EXTI4_IRQHandler(void) {
+    if (EXTI->PR & (1UL << 4)) {
+        EXTI->PR = (1UL << 4);
+        uint32_t now = g_ctx.config->get_sys_time_ms();
+        for (int i = 0; i < JM_STM32_MAX_PIN_INTERRUPTS; i++) {
+            if (g_pinInterrupts[i].active && (g_pinInterrupts[i].pin & 0x0F) == 4) {
+                if (now - g_pinInterrupts[i].last_irq_time < JM_STM32_DEBOUNCE_MS) continue;
+                g_pinInterrupts[i].last_irq_time = now;
+                jm_stm32_pinInterrupt(g_pinInterrupts[i].pin);
+            }
+        }
+    }
+}
+
+void EXTI9_5_IRQHandler(void) {
+    uint32_t now = g_ctx.config->get_sys_time_ms();
+    for (int line = 5; line <= 9; line++) {
+        if (EXTI->PR & (1UL << line)) {
+            EXTI->PR = (1UL << line);
+            for (int i = 0; i < JM_STM32_MAX_PIN_INTERRUPTS; i++) {
+                if (g_pinInterrupts[i].active && (g_pinInterrupts[i].pin & 0x0F) == line) {
+                    if (now - g_pinInterrupts[i].last_irq_time < JM_STM32_DEBOUNCE_MS) continue;
+                    g_pinInterrupts[i].last_irq_time = now;
+                    jm_stm32_pinInterrupt(g_pinInterrupts[i].pin);
+                }
+            }
+        }
+    }
+}
+
+void EXTI15_10_IRQHandler(void) {
+    uint32_t now = g_ctx.config->get_sys_time_ms();
+    for (int line = 10; line <= 15; line++) {
+        if (EXTI->PR & (1UL << line)) {
+            EXTI->PR = (1UL << line);
+            for (int i = 0; i < JM_STM32_MAX_PIN_INTERRUPTS; i++) {
+                if (g_pinInterrupts[i].active && (g_pinInterrupts[i].pin & 0x0F) == line) {
+                    if (now - g_pinInterrupts[i].last_irq_time < JM_STM32_DEBOUNCE_MS) continue;
+                    g_pinInterrupts[i].last_irq_time = now;
+                    jm_stm32_pinInterrupt(g_pinInterrupts[i].pin);
+                }
+            }
+        }
+    }
+}
+
+#endif //JM_STM32_INTERRUPT_ENABLE
+
 static inline bool jm_rx_ring_push(uint8_t byte)
 {
     uint16_t next = (g_rx_ring.head + 1) % JM_RX_RING_SIZE;
@@ -56,7 +298,7 @@ static inline bool jm_rx_ring_pop(uint8_t *byte)
     return true;
 }
 
-static int jm_send_serial_packet(uint16_t subtype, uint16_t msg_id, const uint8_t *payload, uint16_t payload_len);
+
 
 static void jm_free_string(char *s)
 {
@@ -358,6 +600,7 @@ static jm_emap_t *jm_ctrl_not_found(void) {
 
 jm_emap_t *jm_ctrl_invokeFunc(jm_emap_t *ps) {
     if (!ps) return NULL;
+
     int32_t defId = jm_emap_getInt(ps, "funName", 0);
     if (!defId) {
         defId = jm_emap_getInt(ps, "_fn", 0);
@@ -365,20 +608,16 @@ jm_emap_t *jm_ctrl_invokeFunc(jm_emap_t *ps) {
 
     JM_LOG_D("defId=%d",defId);
     if (!defId) {
-        jm_emap_t *rst = jm_emap_create(0);
-        if (rst) {
-            jm_emap_putInt(rst, "code", 2, false);
-            jm_emap_putStr(rst, "msg", "invalid defId", false, false);
-        }
-        return rst;
+        return jm_stm32_ctrl_def(ps);
     }
+
     for (int i = 0; i < g_ctrl_reg_count; i++) {
         if (g_ctrl_reg[i].defId == defId) {
             return g_ctrl_reg[i].fn(ps);
         }
     }
 
-    JM_LOG_D("defP=%d",defId);
+    //JM_LOG_D("defP=%d",defId);
     return jm_ctrl_not_found();
 }
 
@@ -563,7 +802,7 @@ static void jm_parse_serial_packet(const uint8_t *payload, uint16_t payload_len)
                 // JM_LOG_D("ivfR");
                 if (rst) {
                     if (req_id > 0) {
-                         // JM_LOG_D("crst");
+                         JM_LOG_D("crst");
                         jm_stm32_send_ctrl_rst(req_id, rst);
                     }
                     //  JM_LOG_D("1");
@@ -577,6 +816,74 @@ static void jm_parse_serial_packet(const uint8_t *payload, uint16_t payload_len)
         JM_LOG_D("ctrlE");
         break;
     }
+
+#if JM_STM32_EVENT_ENABLE
+    case JM_TASK_APP_PROXY_NETCARD_EVENT:
+		{
+			uint8_t flag = 0;
+			if(!jm_buf_get_u8(buf, &flag)) {
+				JM_LOG_E("evtFErr");
+				return;
+			}
+
+			uint8_t eventType = 0;
+			if(!jm_buf_get_u8(buf, &eventType)) {
+				JM_LOG_E("evtTErr");
+				return;
+			}
+
+			uint8_t evtSubType = 0;
+			if(!jm_buf_get_u8(buf, &evtSubType)) {
+				JM_LOG_E("evtSTErr");
+				return;
+			}
+
+			flag = flag|JM_EVENT_FLAG_FROM_NETCARD|JM_EVENT_FLAG_FREE_EMAP;
+
+			JM_LOG_D("hEvent type=%u evtSubType=%u flag=%u ",eventType, evtSubType,flag);
+
+			jm_emap_t *ps = jm_emap_decode(buf->data, jm_buf_readable_len(buf));
+			jm_stm32_postEvent(eventType, evtSubType, ps , flag);
+
+		}
+		break;
+#endif //#if JM_STM32_EVENT_ENABLE
+
+#if JM_STM32_INTERRUPT_ENABLE
+    case JM_TASK_APP_PROXY_NETCARD_INTERRUPT:
+		{
+            //jm_buf_put_u8(hbuf,1);//注册引脚中断
+            //jm_buf_put_u16(hbuf,pin);
+            // jm_buf_put_u8(hbuf,triggerType);
+            uint8_t opType = 1; //1注册引脚中断， 2：取消注册的引脚中断
+            uint16_t pin = 0; //要注册中断的引用
+			uint8_t triggerType = 0; //引发引脚中断类型与Arduino的引脚中断类型相同，如上升沿，下降沿等
+
+			if(!jm_buf_get_u8(buf, &opType)) {
+				JM_LOG_E("inteErr");
+				return;
+			}
+
+            if(!jm_buf_get_u16(buf, &pin)) {
+				JM_LOG_E("inteErr");
+				return;
+			}
+
+            if(opType == 1 && !jm_buf_get_u8(buf, &triggerType)) {
+				JM_LOG_E("inteErr");
+				return;
+			}
+
+            if(opType == 1) {
+                jm_stm32_registerPinInterrupt(pin, triggerType);
+            }else if(opType == 2) {
+                jm_stm32_unregisterPinInterrupt(pin);
+            }
+            
+		}
+		break;
+#endif //#if JM_STM32_INTERRUPT_ENABLE
+
     default:
         break;
     }
@@ -584,16 +891,6 @@ static void jm_parse_serial_packet(const uint8_t *payload, uint16_t payload_len)
     jm_buf_release(buf);
 
     //JM_LOG_D("SPE");
-}
-
-static jm_emap_t *jm_ctrl_ping(jm_emap_t *ps) {
-    (void)ps;
-    jm_emap_t *rst = jm_emap_create(0);
-    if (rst) {
-        jm_emap_putInt(rst, "code", 0, false);
-        jm_emap_putStr(rst, "msg", "pong", false, false);
-    }
-    return rst;
 }
 
 int jm_stm32_init(const jm_config_t *config)
@@ -607,7 +904,6 @@ int jm_stm32_init(const jm_config_t *config)
     g_ctx.config = config;
     g_ctx.initialized = true;
 
-    //jm_ctrl_registFun(jm_ctrl_ping, 1);
     jm_comp_init();
 
     return JM_SUCCESS;
@@ -623,6 +919,11 @@ void jm_stm32_loop(void)
     }
 
     jm_comp_loop();
+
+#if JM_STM32_EVENT_ENABLE
+    jm_stm32_runEvent();
+#endif
+
 }
 
 bool jm_stm32_uart_push_byte(uint8_t byte)
@@ -765,7 +1066,7 @@ void jm_stm32_uart_rx_byte(uint8_t byte)
 
 jm_buf_t* jm_serial_buf(uint16_t subType, uint16_t msgId, uint16_t size) {
 
- 	jm_buf_t *hbuf = jm_buf_create(size+7);
+ 	jm_buf_t *hbuf = jm_buf_create(size+8);
  	if(hbuf == NULL) {
  		JM_LOG_E("hbuf N");
  		return NULL;
@@ -785,17 +1086,22 @@ jm_buf_t* jm_serial_buf(uint16_t subType, uint16_t msgId, uint16_t size) {
 
 static int jm_send_serial_packet(uint16_t subtype, uint16_t msg_id, const uint8_t *payload, uint16_t payload_len)
 {
-    if (!g_ctx.initialized || !g_ctx.config->uart_send) return JM_ERR_NOT_READY;
+    if (!g_ctx.initialized || !g_ctx.config->uart_send) {
+        JM_LOG_E("SNI")
+        return JM_ERR_NOT_READY;
+    }
+
+    JM_LOG_D("serial_packet %d msg_id=%u",subtype, msg_id); 
 
     jm_buf_t* buf = jm_serial_buf(subtype, msg_id, 0);
 
     uint16_t len = jm_buf_readable_len(buf) + payload_len;
 
-    int8_t byte = (len>>8) & 0xFF;
-    g_ctx.config->uart_send(&byte, 1);//长度高字节
+    uint8_t byte0 = (len>>8) & 0xFF;
+    g_ctx.config->uart_send(&byte0, 1);//长度高字节
 
-    byte = len & 0xFF;
-    g_ctx.config->uart_send(&byte, 1);//长度高字节
+    uint8_t byte1 = len & 0xFF;
+    g_ctx.config->uart_send(&byte1, 1);//长度低字节
 
     uint8_t reqId =  ++REQ_ID;
 	if(reqId==0) {
@@ -804,6 +1110,8 @@ static int jm_send_serial_packet(uint16_t subtype, uint16_t msg_id, const uint8_
 	}
 
 	g_ctx.config->uart_send(&reqId, 1);//协议请求ID,如果reqId为0，则表示是对方返回的确认包
+
+    JM_LOG_D("sd [%x,%x,%x,%x,%x,%x,%x]",byte0,byte1, reqId, buf->data[0], buf->data[1], buf->data[2], buf->data[3]); 
 
     g_ctx.config->uart_send(buf->data, jm_buf_readable_len(buf));
 
@@ -826,8 +1134,11 @@ int jm_stm32_send_ctrl_rst(uint16_t req_id, jm_emap_t *rst) {
         jm_buf_release(buf);
         return JM_ERR_MEMORY;
     }
+   
     uint16_t rlen = jm_buf_readable_len(buf);
     const uint8_t *rdata = jm_buf_read_buf(buf);
+
+    JM_LOG_D("ctrl_rst %d reqId=%u",rlen, req_id); 
     int ret = jm_send_serial_packet(JM_TASK_APP_PROXY_CTRL_RST, req_id, rdata, rlen);
     jm_buf_release(buf);
     return ret;
@@ -976,7 +1287,8 @@ int jm_serial_read(void *huart)
 #endif
 }
 
-#if JM_STM32_LOG_ENABLE
+
+#if JM_LOG_DEBUG_ENABLE || JM_LOG_ERROR_ENABLE
 #include <stdio.h>
 
 void jm_log_char(char ch)
@@ -1035,6 +1347,144 @@ void jm_delay_ms(uint32_t xms)
 {
 	while(xms--)
 	{
-		Delay_us(1000);
+		jm_delay_us(1000);
 	}
 }
+
+#if JM_STM32_EVENT_ENABLE
+
+#define JM_STM32_EVENT_QUEUE_SIZE 10
+#define JM_MAX_EVENT_LISTENERS 8
+
+typedef void (*jm_event_listener_fn)(jm_event_t *event);
+
+static jm_event_t eventQueue[JM_STM32_EVENT_QUEUE_SIZE];
+static uint8_t eventQueueHead = 0;
+static uint8_t eventQueueTail = 0;
+static bool eventQueueEmpty = true;
+
+typedef struct {
+    uint8_t eventType;
+    jm_event_listener_fn callback;
+    bool active;
+} jm_event_listener_entry_t;
+
+static jm_event_listener_entry_t eventListeners[JM_MAX_EVENT_LISTENERS];
+
+//上行事件给给网卡
+bool jm_stm32_transEventToCard(jm_event_t *e) {
+
+    //e->type, e->subType, e->data, g_ctx.config->user_data
+    uint8_t eventType =e->type; 
+    uint16_t subType = e->subType; 
+    jm_emap_t *ps =e->data; 
+    uint8_t flag = e->flag;
+
+    jm_buf_t *hbuf = jm_buf_create(128);
+ 	if(hbuf == NULL) {
+ 		JM_LOG_E("hbuf N");
+ 		return NULL;
+ 	}
+
+ 	//两个0总长度表示不拆包，也就是本地命令包长度不能大于JM_MAX_SERIAL_BLOCK_SIZE
+    jm_buf_put_u8(hbuf, flag);
+ 	jm_buf_put_u8(hbuf, eventType);
+ 	jm_buf_put_u16(hbuf, subType);
+
+	if(ps && !jm_emap_encode(ps,hbuf)) {
+		JM_LOG_E("transEvent encode MO");
+		jm_buf_release(hbuf);
+		return false;
+	}
+
+	jm_send_serial_packet(JM_TASK_APP_PROXY_NETCARD_EVENT, 0, (uint8_t*) hbuf->data, jm_buf_readable_len(hbuf));
+
+	jm_buf_release(hbuf);
+
+	JM_LOG_D("transEvent E");
+	return true;	
+}
+
+bool jm_stm32_postEvent(uint8_t eventType, uint16_t subType, void *data, uint8_t flag)
+{
+    if (eventQueueHead == eventQueueTail && !eventQueueEmpty) {
+        return false;
+    }
+
+    jm_event_t *e = &eventQueue[eventQueueTail];
+    e->type = eventType;
+    e->subType = subType;
+    e->data = data;
+    e->flag = flag;
+    eventQueueTail = (eventQueueTail + 1) % JM_STM32_EVENT_QUEUE_SIZE;
+    if (eventQueueHead == eventQueueTail) {
+        eventQueueEmpty = false;
+    }
+    return true;
+}
+
+bool jm_stm32_regEventListener(uint8_t eventType, jm_event_listener_fn callback)
+{
+    for (int i = 0; i < JM_MAX_EVENT_LISTENERS; i++) {
+        if (eventListeners[i].active &&
+            eventListeners[i].eventType == eventType &&
+            eventListeners[i].callback == callback) {
+            return true;
+        }
+    }
+
+    for (int i = 0; i < JM_MAX_EVENT_LISTENERS; i++) {
+        if (!eventListeners[i].active) {
+            eventListeners[i].eventType = eventType;
+            eventListeners[i].callback = callback;
+            eventListeners[i].active = true;
+            return true;
+        }
+    }
+    return false;
+}
+
+bool jm_stm32_unregEventListener(uint8_t eventType, jm_event_listener_fn callback)
+{
+    for (int i = 0; i < JM_MAX_EVENT_LISTENERS; i++) {
+        if (eventListeners[i].active &&
+            eventListeners[i].eventType == eventType &&
+            eventListeners[i].callback == callback) {
+            eventListeners[i].active = false;
+            return true;
+        }
+    }
+    return true;
+}
+
+static void _jm_invokeEventListener(jm_event_t *event)
+{
+    for (int i = 0; i < JM_MAX_EVENT_LISTENERS; i++) {
+        if (eventListeners[i].active && eventListeners[i].eventType == event->type) {
+            eventListeners[i].callback(event);
+        }
+    }
+}
+
+static void jm_stm32_runEvent(void)
+{
+    if (eventQueueHead == eventQueueTail && eventQueueEmpty) {
+        return;
+    }
+    jm_event_t *e = &eventQueue[eventQueueHead];
+   
+    eventQueueHead = (eventQueueHead + 1) % JM_STM32_EVENT_QUEUE_SIZE;
+    if (eventQueueHead == eventQueueTail) {
+        eventQueueEmpty = true;
+    }
+    
+    if(!(e->flag & JM_EVENT_FLAG_FROM_NETCARD)) {
+		//非网卡所连设备上行事件，转发到网卡所连接设备
+		//jm_cli_serial_transEventToHost(jevent);
+        jm_stm32_transEventToCard(e);
+	}
+
+    _jm_invokeEventListener(e);
+}
+
+#endif

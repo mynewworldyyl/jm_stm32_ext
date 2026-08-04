@@ -48,9 +48,13 @@ extern "C" {
 #define JM_TASK_APP_PROXY_SYS_CFG          20
 #define JM_TASK_APP_PROXY_TRANS_CMD        21
 #define JM_TASK_APP_PROXY_AUDIO_PLAY       22
+#define JM_TASK_APP_PROXY_CTRL_EVENT       27
 #define JM_TASK_APP_PROXY_CTRL_CMD         29
 #define JM_TASK_APP_PROXY_CTRL_RST         30
-#define JM_TASK_APP_PROXY_CTRL_EVENT       27
+
+#define JM_TASK_APP_PROXY_NETCARD_EVENT 31    //下发事件命令到主机或上行事件到网卡
+#define JM_TASK_APP_PROXY_NETCARD_INTERRUPT (32)    //引脚中断事件
+
 
 #define JM_SUCCESS                  0
 #define JM_ERR_MEMORY              -1
@@ -79,9 +83,6 @@ void jm_log_print(const char *format, ...);
 
 
 #include <stdarg.h>
-
-#define JM_LOG_DEBUG_ENABLE 1
-#define JM_LOG_ERROR_ENABLE 1
 
 #define JM_LOG_LINE(format, ...) \
     do { jm_log_print((const char*)format, ## __VA_ARGS__); jm_log_char('\n'); } while(0)
@@ -185,8 +186,7 @@ jm_emap_t *jm_emap_decode(const uint8_t *data, uint16_t len);
 
 bool jm_ctrl_registFun(jm_ctrl_fn_t fn, int32_t defId);
 jm_emap_t *jm_ctrl_invokeFunc(jm_emap_t *ps);
-
-int jm_stm32_send_ctrl_rst(uint16_t req_id, jm_emap_t *rst);
+jm_emap_t *jm_stm32_ctrl_def(jm_emap_t *ps);
 
 int jm_stm32_init(const jm_config_t *config);
 void jm_stm32_loop(void);
@@ -224,6 +224,32 @@ void jm_delay_us(uint32_t xus);
   * @retval 无
   */
 void jm_delay_ms(uint32_t xms);
+
+/* ===================== Event system ===================== */
+
+#define JM_EVENT_FLAG_DEFAULT     0
+#define JM_EVENT_FLAG_FREE_DATA   0x01
+#define JM_EVENT_FLAG_FREE_EMAP   0x02
+#define JM_EVENT_FLAG_FREE_ELIST  0x04
+#define JM_EVENT_FLAG_FREE_STR    0x08
+#define JM_EVENT_FLAG_FREE_MSG    0x10
+#define JM_EVENT_FLAG_FROM_NETCARD 0x20
+
+#if JM_STM32_EVENT_ENABLE
+typedef struct {
+    uint8_t type;
+    uint16_t subType;
+    void *data;
+    uint8_t flag;
+} jm_event_t;
+
+typedef void (*jm_event_listener_fn)(jm_event_t *event);
+
+bool jm_stm32_postEvent(uint8_t eventType, uint16_t subType, void *data, uint8_t flag);
+bool jm_stm32_regEventListener(uint8_t eventType, jm_event_listener_fn callback);
+bool jm_stm32_unregEventListener(uint8_t eventType, jm_event_listener_fn callback);
+
+#endif //#if JM_STM32_EVENT_ENABLE
 
 #ifdef __cplusplus
 }
