@@ -1,4 +1,5 @@
 #include "jm_stm32.h"
+#include "jm_stm32_com.h"
 
 #if defined(USE_HAL_UART)
 #include "stm32f1xx_hal.h"
@@ -95,21 +96,29 @@ static void on_event(uint8_t event_type, uint16_t sub_type, void *data, void *us
             (long)r->login_code, r->dev_uid, r->login_key);
         break;
     }
+
+#if JM_STM32_TESTTCP_ENABLE   
     case JM_EVENT_TCP_CONNECTED:
-    case JM_EVENT_TCP_DISCONNECTED: {
-        jm_tcp_conn_info_t *c = (jm_tcp_conn_info_t *)data;
-        JM_LOG_D("EVT: tcp %s sock=%d %s:%d",
-            event_type == JM_EVENT_TCP_CONNECTED ? "connected" : "disconnected",
-            c->sock, c->host, c->port);
+    case JM_EVENT_TCP_DISCONNECTED:
+    case JM_EVENT_TCP_SEND_RESULT:
+    case JM_EVENT_TCP_ERROR:
+    case JM_EVENT_TCP_DATA: {
+        jm_tcp_test_on_event(event_type, data);
         break;
     }
-    case JM_EVENT_TCP_DATA:
+#endif
+
+#if JM_STM32_TESTUDP_ENABLE  
     case JM_EVENT_UDP_DATA: {
-        jm_buf_t *buf = (jm_buf_t *)data;
-        uint16_t n = jm_buf_readable_len(buf);
-        JM_LOG_D("EVT: %s data len=%u", event_type == JM_EVENT_TCP_DATA ? "tcp" : "udp", n);
+        //jm_buf_t *buf = (jm_buf_t *)data;
+        //uint16_t n = jm_buf_readable_len(buf);
+        //JM_LOG_D("EVT: udp data len=%u", n);
+        jm_udp_test_on_event(JM_EVENT_UDP_DATA, data);
         break;
     }
+#endif
+
+
     default:
         JM_LOG_D("NSPE: event_type=%d sub_type=%d",event_type, sub_type);
         break;
@@ -190,15 +199,15 @@ int main(void)
         while (1);
     }
 
-    JM_LOG_LINE("jm_stm32 start");
+      JM_LOG_LINE("jm_stm32 start");
 
    // uint32_t last_log = get_sys_time();
     while (1) {
         //uint32_t now = get_sys_time();
         //if (now - last_log >= 2000) {
          //   last_log = now;
-           //JM_LOG_LINE("test log: %lu ms", now);
-       // }
+            //JM_LOG_LINE("test log: %lu ms", now);
+        // }
         jm_stm32_loop();
     }
 }

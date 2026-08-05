@@ -893,6 +893,13 @@ static void jm_parse_serial_packet(const uint8_t *payload, uint16_t payload_len)
     //JM_LOG_D("SPE");
 }
 
+uint32_t jm_stm32_get_time(void) {
+    if (g_ctx.initialized && g_ctx.config && g_ctx.config->get_sys_time_ms) {
+        return g_ctx.config->get_sys_time_ms();
+    }
+    return 0;
+}
+
 int jm_stm32_init(const jm_config_t *config)
 {
     if (!config || !config->get_sys_time_ms || !config->uart_send) {
@@ -904,7 +911,7 @@ int jm_stm32_init(const jm_config_t *config)
     g_ctx.config = config;
     g_ctx.initialized = true;
 
-    jm_comp_init();
+    jm_comp_init(config);
 
     return JM_SUCCESS;
 }
@@ -1023,26 +1030,36 @@ void jm_stm32_uart_rx_byte(uint8_t byte)
         uint16_t payload_len = jm_buf_readable_len(g_ctx.rx.assembling_buf);
         const uint8_t *payload = jm_buf_read_buf(g_ctx.rx.assembling_buf);
 
-        if (payload_len >= 8 && payload[0] == 0 && payload[1] == 0 && payload[2] == JM_SDADA_CHECK_NUM && payload[3] == JM_SERIALNET_TYPE_SERIAL) {
-            //JM_LOG_D("JM_SERIALNET_TYPE_SERIAL %d",payload[3]);
-            jm_parse_serial_packet(payload, payload_len);
-        } else if (payload_len >= 3 && payload[0] == 0 && payload[2] == JM_SDADA_CHECK_NUM) {
-            uint8_t type = payload[3];
-            uint8_t evt_type = 0;
-            if (type == JM_SERIALNET_TYPE_TCP) evt_type = JM_EVENT_TCP_DATA;
-            else if (type == JM_SERIALNET_TYPE_UDP || type == JM_SERIALNET_TYPE_UDP_COM) evt_type = JM_EVENT_UDP_DATA;
+         if (payload_len >= 8 && payload[0] == 0 && payload[1] == 0 && payload[2] == JM_SDADA_CHECK_NUM && payload[3] == JM_SERIALNET_TYPE_SERIAL) {
+             //JM_LOG_D("JM_SERIALNET_TYPE_SERIAL %d",payload[3]);
+             jm_parse_serial_packet(payload, payload_len);
+         } else if (payload_len >= 3 && payload[0] == 0 && payload[2] == JM_SDADA_CHECK_NUM) {
+             uint8_t type = payload[3];
+             uint8_t evt_type = 0;
+             if (type == JM_SERIALNET_TYPE_TCP) evt_type = JM_EVENT_TCP_DATA;
+             else if (type == JM_SERIALNET_TYPE_UDP || type == JM_SERIALNET_TYPE_UDP_COM) evt_type = JM_EVENT_UDP_DATA;
+             else if (type == JM_SERIALNET_TYPE_MQTT) {
+                 jm_mqtt_client_on_serial_data(payload + 4, payload_len - 4);
+                 g_ctx.rx.assembling_buf = NULL;
+                 g_ctx.rx.data_size = 0;
+                 g_ctx.rx.recv_size = 0;
+                 g_ctx.rx.ds = 0;
+                 g_ctx.rx.req_id = 0;
+                 g_ctx.rx.wpos = 0;
+                 return;
+             }
 
-            JM_LOG_D("got type=%d evt_type=%d",type, evt_type);
+             JM_LOG_D("got type=%d evt_type=%d",type, evt_type);
 
-            if (evt_type != 0) {
-                jm_buf_t *buf = jm_buf_wrap_array(payload, payload_len);
-                if (buf) {
-                    JM_LOG_D("dispatch dl=%d evt_type=%d", payload_len, evt_type);
-                    jm_dispatch_event(evt_type, 0, buf);
-                    jm_buf_release(buf);
-                }
-            }
-        } else {
+             if (evt_type != 0) {
+                 jm_buf_t *buf = jm_buf_wrap_array(payload, payload_len);
+                 if (buf) {
+                     JM_LOG_D("dispatch dl=%d evt_type=%d", payload_len, evt_type);
+                     jm_dispatch_event(evt_type, 0, buf);
+                     jm_buf_release(buf);
+                 }
+             }
+         } else {
             JM_LOG_D("tcp data dl=%d",payload_len);
             jm_buf_t *buf = jm_buf_wrap_array(payload, payload_len);
             if (buf) {
@@ -1064,9 +1081,18 @@ void jm_stm32_uart_rx_byte(uint8_t byte)
     }
 }
 
-jm_buf_t* jm_serial_buf(uint16_t subType, uint16_t msgId, uint16_t size) {
+ uint8_t jm_stm32_next_req_id(void) {
+    uint8_t reqId =  ++REQ_ID;
+	if(reqId==0) {
+		//确保reqId不等于0或1
+		reqId = REQ_ID = 2;
+	}
+    return reqId;
+ }
 
- 	jm_buf_t *hbuf = jm_buf_create(size+8);
+jm_buf_t* jm_other_buf(uint8_t type, uint16_t size) {
+
+ 	jm_buf_t *hbuf = jm_buf_create(size+5);
  	if(hbuf == NULL) {
  		JM_LOG_E("hbuf N");
  		return NULL;
@@ -1077,7 +1103,59 @@ jm_buf_t* jm_serial_buf(uint16_t subType, uint16_t msgId, uint16_t size) {
  	jm_buf_put_u8(hbuf, 0);
  	jm_buf_put_u8(hbuf, JM_SDADA_CHECK_NUM); // 用于校验数据合法性
 
- 	jm_buf_put_u8(hbuf, JM_SERIALNET_TYPE_SERIAL);
+ 	jm_buf_put_u8(hbuf, type);
+ 	return hbuf;
+}
+
+static int jm_send_other_packet(uint8_t type, const uint8_t *payload, uint16_t payload_len)
+{
+    if (!g_ctx.initialized || !g_ctx.config->uart_send) {
+        JM_LOG_E("SNI")
+        return JM_ERR_NOT_READY;
+    }
+
+    JM_LOG_D("other_packet type=%u",type); 
+
+    uint8_t data[4] = {0, 0, JM_SDADA_CHECK_NUM, type};
+
+    //jm_buf_t* buf = jm_other_buf(type, 0);
+
+    uint16_t len = 5 + payload_len;
+
+    uint8_t byte0 = (len>>8) & 0xFF;
+    g_ctx.config->uart_send(&byte0, 1);//长度高字节
+
+    uint8_t byte1 = len & 0xFF;
+    g_ctx.config->uart_send(&byte1, 1);//长度低字节
+
+    uint8_t reqId =  ++REQ_ID;
+	if(reqId==0) {
+		//确保reqId不等于0或1
+		reqId = REQ_ID = 2;
+	}
+
+	g_ctx.config->uart_send(&reqId, 1);//协议请求ID,如果reqId为0，则表示是对方返回的确认包
+
+    JM_LOG_D("sd [%x,%x,%x,%x,%x,%x,%x]",byte0, byte1, reqId, data[0], data[1], data[2], data[3]); 
+
+    g_ctx.config->uart_send(data, 4);
+
+    if (payload_len > 0 && payload) {
+        g_ctx.config->uart_send(payload, payload_len);
+    }
+
+    return JM_SUCCESS;
+}
+
+
+static jm_buf_t* jm_serial_buf(uint16_t subType, uint16_t msgId, uint16_t size) {
+
+    jm_buf_t *hbuf = jm_other_buf(JM_SERIALNET_TYPE_SERIAL, size+5);
+    if(hbuf == NULL) {
+ 		JM_LOG_E("hbuf N");
+ 		return NULL;
+ 	}
+
  	jm_buf_put_u16(hbuf, subType);
  	jm_buf_put_u16(hbuf, msgId);
 
@@ -1103,11 +1181,7 @@ static int jm_send_serial_packet(uint16_t subtype, uint16_t msg_id, const uint8_
     uint8_t byte1 = len & 0xFF;
     g_ctx.config->uart_send(&byte1, 1);//长度低字节
 
-    uint8_t reqId =  ++REQ_ID;
-	if(reqId==0) {
-		//确保reqId不等于0或1
-		reqId = REQ_ID = 2;
-	}
+    uint8_t reqId =  jm_stm32_next_req_id();
 
 	g_ctx.config->uart_send(&reqId, 1);//协议请求ID,如果reqId为0，则表示是对方返回的确认包
 
@@ -1206,18 +1280,21 @@ int jm_stm32_send_login(void)
 
 int jm_stm32_send_tcp_connect(const char *host, uint16_t port)
 {
-    uint16_t host_len = host ? (uint16_t)strlen(host) : 0;
-    uint16_t payload_len = 2 + host_len;
-    uint8_t *payload = (uint8_t *)malloc(payload_len);
-    if (!payload) return JM_ERR_MEMORY;
 
-    payload[0] = (uint8_t)((port >> 8) & 0xFF);
-    payload[1] = (uint8_t)(port & 0xFF);
-    if (host_len > 0) memcpy(&payload[2], host, host_len);
+    jm_buf_t *buf = jm_buf_create(32);
+    if (!buf) return JM_ERR_MEMORY;
 
-    int ret = jm_send_serial_packet(JM_TASK_APP_PROXY_TCP_CONNECTED, 0, payload, payload_len);
-    free(payload);
+    jm_buf_write_string(buf, host, strlen(host));
+    jm_buf_put_u16(buf,port);
+   
+    uint16_t rlen = jm_buf_readable_len(buf);
+    const uint8_t *rdata = jm_buf_read_buf(buf);
+
+    JM_LOG_D("tcp_connect %s:%u dl=%d",host, port, rlen); 
+    int ret = jm_send_serial_packet(JM_TASK_APP_PROXY_TCP_CONN, 0, rdata, rlen);
+    jm_buf_release(buf);
     return ret;
+
 }
 
 int jm_stm32_send_tcp_close(int8_t sock)
@@ -1227,29 +1304,73 @@ int jm_stm32_send_tcp_close(int8_t sock)
     return jm_send_serial_packet(JM_TASK_APP_PROXY_TCP_CLOSE, 0, payload, 1);
 }
 
-int jm_stm32_send_tcp_data(int8_t sock, const uint8_t *data, uint16_t len)
+int jm_stm32_send_tcp_data(int8_t sock, const uint8_t *payload, uint16_t plen)
 {
-    if (!data || len == 0) return JM_ERR_INVALID_PACKET;
+    if (!g_ctx.initialized || !g_ctx.config->uart_send) {
+        JM_LOG_E("SNI")
+        return JM_ERR_NOT_READY;
+    }
 
-    uint16_t inner_len = 1 + len;
-    uint16_t total_len = 1 + 2 + 1 + inner_len;
+    uint16_t len = 5 + plen;
 
-    uint8_t header[6];
-    header[0] = (uint8_t)((total_len >> 8) & 0xFF);
-    header[1] = (uint8_t)(total_len & 0xFF);
-    header[2] = 1;
-    header[3] = 0;
-    header[4] = 0;
-    header[5] = JM_SDADA_CHECK_NUM;
+    uint8_t byte0 = (len>>8) & 0xFF;
+    uint8_t byte1 = len & 0xFF;
 
-    uint8_t type = JM_SERIALNET_TYPE_TCP;
-    uint8_t sock_byte = (uint8_t)sock;
+    uint8_t reqId = jm_stm32_next_req_id();
 
-    g_ctx.config->uart_send(header, sizeof(header));
-    g_ctx.config->uart_send(&type, sizeof(type));
-    g_ctx.config->uart_send(&sock_byte, sizeof(sock_byte));
-    if (len > 0) {
-        g_ctx.config->uart_send(data, len);
+    uint8_t data[8] = {
+        byte0, ////长度高字节
+        byte1, //长度低字节
+        reqId , //数据包ID
+        0, 0, //组包类型，0，0不需要重组包
+        JM_SDADA_CHECK_NUM, //校验和
+        JM_SERIALNET_TYPE_TCP, //TCB数据包
+        sock //socket连接标识
+    };
+
+    JM_LOG_D("sd [%x,%x,%x,%x,%x,%x,%x]",data[0], data[1], data[2], data[3], data[4], data[5], data[6], data[7]); 
+
+    g_ctx.config->uart_send(data, 8);//协议请求ID,如果reqId为0，则表示是对方返回的确认包
+
+    if (plen > 0 && payload) {
+        g_ctx.config->uart_send(payload, plen);
+    }
+
+    return JM_SUCCESS;
+}
+
+int jm_stm32_send_udp_data(const char *host, uint16_t port, const uint8_t *payload, uint16_t plen)
+{
+    if (!g_ctx.initialized || !g_ctx.config->uart_send) {
+        JM_LOG_E("SNI")
+        return JM_ERR_NOT_READY;
+    }
+
+    jm_buf_t *buf = jm_buf_create(24);
+    if (!buf) return JM_ERR_MEMORY;
+
+    jm_buf_put_u16(buf, 0);//两个字节的头部长度，都是0给不拆包
+    jm_buf_put_u8(buf, JM_SDADA_CHECK_NUM);
+    jm_buf_put_u8(buf, JM_SERIALNET_TYPE_UDP_COM);
+
+    jm_buf_write_string(buf,host, strlen(host));
+    jm_buf_put_u16(buf, port);
+
+
+    uint16_t len = jm_buf_readable_len(buf) + plen;
+
+    uint8_t byte0 = (len>>8) & 0xFF;
+    uint8_t byte1 = len & 0xFF;
+
+    uint8_t reqId = jm_stm32_next_req_id();
+
+    uint8_t data[3] = {byte0, byte1,reqId};
+
+    g_ctx.config->uart_send(data, sizeof(data));
+
+    g_ctx.config->uart_send(jm_buf_read_buf(buf), jm_buf_readable_len(buf));
+    if (plen > 0 && payload) {
+        g_ctx.config->uart_send(payload, plen);
     }
 
     return JM_SUCCESS;
@@ -1323,6 +1444,14 @@ void jm_log_print(const char *format, ...)
     }*/
 }
 #endif
+
+int jm_stm32_uart_send(const uint8_t *data, uint16_t len) {
+    if (!g_ctx.initialized || !g_ctx.config->uart_send) {
+        return JM_ERR_NOT_READY;
+    }
+    g_ctx.config->uart_send(data, len);
+    return JM_SUCCESS;
+}
 
 /**
   * @brief  微秒级延时

@@ -23,14 +23,21 @@
 //启用I2C包装器（通用I2C主从操作）
 #define JM_I2C_WRAPPER_ENABLE 0
 
-
-
-
-
-
 //==========================以下测试模块宏开始==========================
 //启用中断模块
 #define JM_STM32_TESTEVENT_ENABLE 0
+
+//启用TCP测试模块
+#define JM_STM32_TESTTCP_ENABLE 0
+
+//启用UDP测试模块
+#define JM_STM32_TESTUDP_ENABLE 0
+
+//启用MQTT代理模块,通过本地的TCP实现，相比JM_MQTT_CLIENT_ENABLE太费内存不建议使用
+#define JM_MQTT_PROXY_ENABLE 0
+
+//简化MQTT代理实现
+#define JM_MQTT_CLIENT_ENABLE 1
 
 //==========================测试模块宏结束==========================
 

@@ -23,6 +23,10 @@ extern "C" {
 #define JM_SERIALNET_TYPE_SERIAL   3
 #define JM_SERIALNET_TYPE_UDP_COM  4
 #define JM_SERIALNET_TYPE_SYS      5
+#define JM_SERIALNET_TYPE_MQTT     6
+
+#define JM_MQTT_CLIENT_ENABLE 1
+#define JM_SERIALNET_TYPE_MQTT     6
 
 #define PREFIX_TYPE_NULL            -128
 #define PREFIX_TYPE_MAP             -122
@@ -32,10 +36,12 @@ extern "C" {
 #define PREFIX_TYPE_LONG            -118
 #define PREFIX_TYPE_STRINGG         -113
 
-#define JM_TASK_APP_PROXY_TCP_CONNECTED    1
-#define JM_TASK_APP_PROXY_TCP_DISCONNECTED 2
-#define JM_TASK_APP_PROXY_TCP_SEND         3
-#define JM_TASK_APP_PROXY_TCP_ERR          5
+#define JM_TASK_APP_PROXY_TCP_CONNECTED (1)  //TCP代理事件字类型 连接成功
+#define JM_TASK_APP_PROXY_TCP_DISCONNECTED (2)  //TCP代理事件字类型 连接断开
+#define JM_TASK_APP_PROXY_TCP_SEND 3 //TCP发送数据结果
+#define JM_TASK_APP_PROXY_TCP_CONN 4 //TCP连接结果
+#define JM_TASK_APP_PROXY_TCP_ERR 5 //TCP连接结果
+
 #define JM_TASK_APP_PROXY_WIFI_CFG         6
 #define JM_TASK_APP_PROXY_WIFI_CONNECTED   7
 #define JM_TASK_APP_PROXY_INTERNET_ENABLE  10
@@ -192,6 +198,7 @@ int jm_stm32_init(const jm_config_t *config);
 void jm_stm32_loop(void);
 bool jm_stm32_uart_push_byte(uint8_t byte);
 void jm_stm32_uart_rx_byte(uint8_t byte);
+uint32_t jm_stm32_get_time(void);
 
 int jm_serial_read(void *huart);
 
@@ -203,12 +210,16 @@ int jm_stm32_send_login(void);
 int jm_stm32_send_tcp_connect(const char *host, uint16_t port);
 int jm_stm32_send_tcp_close(int8_t sock);
 int jm_stm32_send_tcp_data(int8_t sock, const uint8_t *data, uint16_t len);
+int jm_stm32_send_udp_data(const char *host, uint16_t port, const uint8_t *data, uint16_t len);
 int jm_stm32_send_audio_play(const char *text);
 int jm_stm32_send_ctrl_event(const uint8_t *data, uint16_t len);
 int jm_stm32_send_trans_cmd_response(uint16_t req_id, const uint8_t *data, uint16_t len);
 int jm_stm32_send_ctrl_rst(uint16_t req_id, jm_emap_t *rst);
+uint8_t jm_stm32_next_req_id(void);
+int jm_stm32_uart_send(const uint8_t *data, uint16_t len);
+void jm_mqtt_client_on_serial_data(const uint8_t *data, uint16_t len);
 
-void jm_comp_init(void);
+void jm_comp_init(const jm_config_t *config);
 void jm_comp_loop(void);
 
 /**
