@@ -74,13 +74,14 @@ static void mqtt_client_disconnect_callback(void) {
 }
 
 void jm_mqtt_client_test_init(const jm_config_t *config) {
+
     jm_mqtt_client_init(mqtt_client_message_callback,
                         mqtt_client_connect_callback,
                         mqtt_client_disconnect_callback);
 
     button_init();
 
-    JM_LOG_D("MQTT client test init done, connecting to %s:%d", MQTT_BROKER_HOST, MQTT_BROKER_PORT);
+    JM_LOG_D("MQTT inito %s:%d", MQTT_BROKER_HOST, MQTT_BROKER_PORT);
 
     int rc = jm_mqtt_client_connect(MQTT_BROKER_HOST, MQTT_BROKER_PORT,
                                     MQTT_CLIENT_ID, MQTT_KEEPALIVE);
@@ -94,7 +95,7 @@ void jm_mqtt_client_test_loop(void) {
     if (!g_mqtt_connected) {
         return;
     }
- JM_LOG_E("test_loop");
+ //JM_LOG_E("test_loop");
     uint32_t now = jm_stm32_get_time();
     uint8_t state = button_read();
 

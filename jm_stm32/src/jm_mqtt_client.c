@@ -28,10 +28,7 @@ static uint8_t jm_mqtt_client_next_req_id(void) {
 
 static void jm_mqtt_sendHead(uint16_t total_len)
 {
-    uint8_t len_header[3];
-    len_header[0] = (total_len >> 8) & 0xFF;
-    len_header[1] = total_len & 0xFF;
-    len_header[2] = jm_stm32_next_req_id() ;
+    uint8_t len_header[] = {PCK_HEANDER, (total_len >> 8) & 0xFF, total_len & 0xFF, jm_mqtt_client_next_req_id()};
     jm_stm32_uart_send(len_header, sizeof(len_header));
 }
 
@@ -196,16 +193,14 @@ int jm_mqtt_client_publish(const char *topic, const uint8_t *payload, uint16_t l
     if (len > JM_MQTT_CLIENT_MAX_PAYLOAD_LEN) return JM_ERR_INVALID_PACKET;
     if (qos > 2) qos = 0;
 
-    jm_buf_t *buf = jm_buf_create(JM_MQTT_CLIENT_MAX_TOPIC_LEN + len + 8);
+    jm_buf_t *buf = jm_buf_create(strlen(topic) + len + 4);
     if (!buf) return JM_ERR_MEMORY;
 
     jm_buf_write_string(buf, topic, (uint16_t)strlen(topic));
     jm_buf_put_u8(buf, qos);
     jm_buf_put_u8(buf, retained ? 1 : 0);
     jm_buf_put_u16(buf, len);
-    if (len > 0) {
-        jm_buf_put_bytes(buf, payload, len);
-    }
+    jm_buf_put_bytes(buf, payload, len);
 
     uint16_t payload_len = jm_buf_readable_len(buf);
     const uint8_t *data = jm_buf_read_buf(buf);

@@ -31,6 +31,7 @@ typedef struct {
     uint8_t req_id;
     uint8_t ack_req_id;
     uint16_t wpos;
+    uint8_t cheader;//当前包的头部值
 } jm_rx_state_t;
 
 typedef struct {
@@ -953,12 +954,19 @@ void jm_stm32_uart_rx_byte(uint8_t byte)
         g_ctx.rx.ds = 0;
         g_ctx.rx.req_id = 0;
         g_ctx.rx.wpos = 0;
+        g_ctx.rx.cheader = 0;
+
     }
     g_ctx.rx.last_recv_time = now;
 
     if (g_ctx.rx.ds == 0) {
-        g_ctx.rx.data_size = (uint16_t)byte << 8;
-        g_ctx.rx.ds = 1;
+
+        if(g_ctx.rx.cheader == PCK_HEANDER) {
+            g_ctx.rx.data_size = (uint16_t)byte << 8;
+            g_ctx.rx.ds = 1;
+        }else {
+            g_ctx.rx.cheader = byte;
+        }
         return;
     }
 
@@ -1012,6 +1020,8 @@ void jm_stm32_uart_rx_byte(uint8_t byte)
     g_ctx.rx.recv_size++;
 
     if (g_ctx.rx.recv_size == g_ctx.rx.data_size) {
+        g_ctx.rx.cheader = 0; //重置包头
+
         if (g_ctx.rx.req_id > 1) {
             uint8_t ack_pkt[4] = {0, 1, 0, g_ctx.rx.req_id};
             g_ctx.config->uart_send(ack_pkt, sizeof(ack_pkt));
@@ -1097,12 +1107,10 @@ jm_buf_t* jm_other_buf(uint8_t type, uint16_t size) {
  		JM_LOG_E("hbuf N");
  		return NULL;
  	}
-
  	//两个0总长度表示不拆包，也就是本地命令包长度不能大于JM_MAX_SERIAL_BLOCK_SIZE
  	jm_buf_put_u8(hbuf, 0);
  	jm_buf_put_u8(hbuf, 0);
  	jm_buf_put_u8(hbuf, JM_SDADA_CHECK_NUM); // 用于校验数据合法性
-
  	jm_buf_put_u8(hbuf, type);
  	return hbuf;
 }
@@ -1116,29 +1124,27 @@ static int jm_send_other_packet(uint8_t type, const uint8_t *payload, uint16_t p
 
     JM_LOG_D("other_packet type=%u",type); 
 
-    uint8_t data[4] = {0, 0, JM_SDADA_CHECK_NUM, type};
-
     //jm_buf_t* buf = jm_other_buf(type, 0);
 
-    uint16_t len = 5 + payload_len;
+    uint16_t len = 4 + payload_len;
+
+   // uint8_t header = PCK_HEANDER;
+    //g_ctx.config->uart_send(&header, 1);
 
     uint8_t byte0 = (len>>8) & 0xFF;
-    g_ctx.config->uart_send(&byte0, 1);//长度高字节
+   // g_ctx.config->uart_send(&byte0, 1);//长度高字节
 
     uint8_t byte1 = len & 0xFF;
-    g_ctx.config->uart_send(&byte1, 1);//长度低字节
+    //g_ctx.config->uart_send(&byte1, 1);//长度低字节
 
-    uint8_t reqId =  ++REQ_ID;
-	if(reqId==0) {
-		//确保reqId不等于0或1
-		reqId = REQ_ID = 2;
-	}
+    uint8_t reqId =  jm_stm32_next_req_id();
+	
+    uint8_t data[] = { PCK_HEANDER, byte0, byte1, reqId, 0, 0, JM_SDADA_CHECK_NUM, type};
+    g_ctx.config->uart_send(data, sizeof(data)); //协议请求ID,如果reqId为0，则表示是对方返回的确认包
 
-	g_ctx.config->uart_send(&reqId, 1);//协议请求ID,如果reqId为0，则表示是对方返回的确认包
+    JM_LOG_D("sd [%x,%x,%x,%x,%x,%x,%x]", data[0], data[1], data[2], data[3],data[4],data[5],data[6],data[7]); 
 
-    JM_LOG_D("sd [%x,%x,%x,%x,%x,%x,%x]",byte0, byte1, reqId, data[0], data[1], data[2], data[3]); 
-
-    g_ctx.config->uart_send(data, 4);
+   // g_ctx.config->uart_send(data, 4);
 
     if (payload_len > 0 && payload) {
         g_ctx.config->uart_send(payload, payload_len);
@@ -1146,7 +1152,6 @@ static int jm_send_other_packet(uint8_t type, const uint8_t *payload, uint16_t p
 
     return JM_SUCCESS;
 }
-
 
 static jm_buf_t* jm_serial_buf(uint16_t subType, uint16_t msgId, uint16_t size) {
 
@@ -1171,21 +1176,25 @@ static int jm_send_serial_packet(uint16_t subtype, uint16_t msg_id, const uint8_
 
     JM_LOG_D("serial_packet %d msg_id=%u",subtype, msg_id); 
 
+   
     jm_buf_t* buf = jm_serial_buf(subtype, msg_id, 0);
-
     uint16_t len = jm_buf_readable_len(buf) + payload_len;
 
     uint8_t byte0 = (len>>8) & 0xFF;
-    g_ctx.config->uart_send(&byte0, 1);//长度高字节
+    //g_ctx.config->uart_send(&byte0, 1);//长度高字节
 
     uint8_t byte1 = len & 0xFF;
-    g_ctx.config->uart_send(&byte1, 1);//长度低字节
+    //g_ctx.config->uart_send(&byte1, 1);//长度低字节
 
     uint8_t reqId =  jm_stm32_next_req_id();
 
-	g_ctx.config->uart_send(&reqId, 1);//协议请求ID,如果reqId为0，则表示是对方返回的确认包
+	//g_ctx.config->uart_send(&reqId, 1);//协议请求ID,如果reqId为0，则表示是对方返回的确认包
 
-    JM_LOG_D("sd [%x,%x,%x,%x,%x,%x,%x]",byte0,byte1, reqId, buf->data[0], buf->data[1], buf->data[2], buf->data[3]); 
+   // JM_LOG_D("sd [%x,%x,%x,%x,%x,%x,%x]",byte0,byte1, reqId, buf->data[0], buf->data[1], buf->data[2], buf->data[3]); 
+
+    uint8_t data[] = { PCK_HEANDER, byte0, byte1, reqId};
+    g_ctx.config->uart_send(data, sizeof(data)); //协议请求ID,如果reqId为0，则表示是对方返回的确认包
+    JM_LOG_D("sd [%x,%x,%x,%x,%x,%x,%x]", data[0], data[1], data[2], data[3]); 
 
     g_ctx.config->uart_send(buf->data, jm_buf_readable_len(buf));
 
@@ -1318,7 +1327,8 @@ int jm_stm32_send_tcp_data(int8_t sock, const uint8_t *payload, uint16_t plen)
 
     uint8_t reqId = jm_stm32_next_req_id();
 
-    uint8_t data[8] = {
+    uint8_t data[] = {
+        PCK_HEANDER,
         byte0, ////长度高字节
         byte1, //长度低字节
         reqId , //数据包ID
@@ -1330,7 +1340,7 @@ int jm_stm32_send_tcp_data(int8_t sock, const uint8_t *payload, uint16_t plen)
 
     JM_LOG_D("sd [%x,%x,%x,%x,%x,%x,%x]",data[0], data[1], data[2], data[3], data[4], data[5], data[6], data[7]); 
 
-    g_ctx.config->uart_send(data, 8);//协议请求ID,如果reqId为0，则表示是对方返回的确认包
+    g_ctx.config->uart_send(data, sizeof(data));//协议请求ID,如果reqId为0，则表示是对方返回的确认包
 
     if (plen > 0 && payload) {
         g_ctx.config->uart_send(payload, plen);
@@ -1364,11 +1374,12 @@ int jm_stm32_send_udp_data(const char *host, uint16_t port, const uint8_t *paylo
 
     uint8_t reqId = jm_stm32_next_req_id();
 
-    uint8_t data[3] = {byte0, byte1,reqId};
+    uint8_t data[3] = { PCK_HEANDER, byte0, byte1,reqId};
 
     g_ctx.config->uart_send(data, sizeof(data));
 
     g_ctx.config->uart_send(jm_buf_read_buf(buf), jm_buf_readable_len(buf));
+
     if (plen > 0 && payload) {
         g_ctx.config->uart_send(payload, plen);
     }

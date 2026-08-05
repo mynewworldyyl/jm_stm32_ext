@@ -2,7 +2,7 @@
 #include "jm_stm32_com.h"
 
 void jm_comp_init(const jm_config_t *config) {
-    
+    JM_LOG_D("jm_comp_initB");
 #if JM_GPIO_CTRL_ENABLE==1
     jm_gpio_init();
 #endif

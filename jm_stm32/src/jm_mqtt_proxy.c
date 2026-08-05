@@ -414,7 +414,6 @@ int jm_mqtt_connect(jm_mqtt_client_t *client, const char *host, uint16_t port, c
             client->state = JM_MQTT_STATE_DISCONNECTED;
             return JM_ERR_TIMEOUT;
         }
-        jm_stm32_loop();
         jm_delay_ms(10);
     }
 
@@ -432,7 +431,6 @@ int jm_mqtt_connect(jm_mqtt_client_t *client, const char *host, uint16_t port, c
             client->state = JM_MQTT_STATE_DISCONNECTED;
             return JM_ERR_TIMEOUT;
         }
-        jm_stm32_loop();
         jm_delay_ms(10);
     }
 

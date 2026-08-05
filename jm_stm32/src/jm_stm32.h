@@ -13,6 +13,8 @@ extern "C" {
 
 #define JM_STM32_VERSION "1.0.0"
 
+#define PCK_HEANDER 0xAA
+
 #define JM_SDADA_CHECK_NUM       0x55
 #define JM_SDATA_HEADER_SIZE     3
 #define JM_MAX_SERIAL_BLOCK_SIZE 1024
