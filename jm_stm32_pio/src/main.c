@@ -31,6 +31,7 @@ static void uart_send_log(const uint8_t *data, uint16_t len)
 void SysTick_Handler(void)
 {
     sys_tick_ms++;
+    //JM_LOG_D("s")
 }
 
 static uint32_t get_sys_time(void)
@@ -199,15 +200,16 @@ int main(void)
         while (1);
     }
 
-      JM_LOG_LINE("jm_stm32 start");
+    JM_LOG_LINE("jm_stm32 started");
 
-   // uint32_t last_log = get_sys_time();
+    uint32_t last_log = get_sys_time();
     while (1) {
-        //uint32_t now = get_sys_time();
+        uint32_t now = get_sys_time();
+        //if(!now) JM_LOG_LINE("t %u", now);
         //if (now - last_log >= 2000) {
-         //   last_log = now;
-            //JM_LOG_LINE("test log: %lu ms", now);
-        // }
+        //    last_log = now;
+         //   JM_LOG_LINE("test log: %lu ms", now);
+        //}
         jm_stm32_loop();
     }
 }

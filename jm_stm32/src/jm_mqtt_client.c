@@ -49,97 +49,7 @@ static int jm_mqtt_client_send_cmd(uint8_t cmd, const uint8_t *data, uint16_t da
     return JM_SUCCESS;
 }
 
-void jm_mqtt_client_on_serial_data(const uint8_t *data, uint16_t len)
-{
-    if (!g_initialized || len < 2) return;
 
-    uint8_t cmd = data[0];
-    const uint8_t *payload = data + 1;
-    uint16_t payload_len = len - 1;
-
-    switch (cmd) {
-        case JM_MQTT_CLIENT_RSP_CONNECT:
-            if (payload_len >= 1 && payload[0] == 0) {
-                g_connected = true;
-                g_connecting = false;
-                JM_LOG_D("mqtt client connected");
-                if (g_connect_cb) g_connect_cb();
-            } else {
-                g_connecting = false;
-                JM_LOG_E("mqtt client connect failed");
-            }
-            break;
-
-        case JM_MQTT_CLIENT_RSP_PUBLISH:
-            JM_LOG_D("mqtt client publish rsp");
-            break;
-
-        case JM_MQTT_CLIENT_RSP_SUBSCRIBE:
-            JM_LOG_D("mqtt client subscribe rsp");
-            break;
-
-        case JM_MQTT_CLIENT_EVT_MESSAGE:
-            if (payload_len >= 4) {
-                jm_buf_t *buf = jm_buf_wrap_array(payload, payload_len);
-                if (!buf) break;
-
-                int8_t flag = 0;
-                char *topic = jm_buf_read_string(buf, &flag);
-                if (!topic || flag <= 0) {
-                    jm_buf_release(buf);
-                    break;
-                }
-
-                uint16_t msg_payload_len = 0;
-                if (!jm_buf_get_u16(buf, &msg_payload_len)) {
-                    free(topic);
-                    jm_buf_release(buf);
-                    break;
-                }
-
-                if (msg_payload_len > jm_buf_readable_len(buf)) {
-                    free(topic);
-                    jm_buf_release(buf);
-                    break;
-                }
-
-                if (g_msg_cb) {
-                    const uint8_t *msg_payload = jm_buf_read_buf(buf);
-                    g_msg_cb(topic, msg_payload, msg_payload_len);
-                }
-
-                free(topic);
-                jm_buf_release(buf);
-            }
-            break;
-
-        case JM_MQTT_CLIENT_EVT_DISCONNECTED:
-            g_connected = false;
-            g_connecting = false;
-            JM_LOG_D("mqtt client disconnected");
-            if (g_disconnect_cb) g_disconnect_cb();
-            break;
-
-        default:
-            break;
-    }
-}
-
-int jm_mqtt_client_init(jm_mqtt_client_msg_cb msg_cb,
-                         jm_mqtt_client_connect_cb connect_cb,
-                         jm_mqtt_client_disconnect_cb disconnect_cb)
-{
-    g_msg_cb = msg_cb;
-    g_connect_cb = connect_cb;
-    g_disconnect_cb = disconnect_cb;
-    g_initialized = true;
-    g_connected = false;
-    g_connecting = false;
-    g_rx_len = 0;
-
-    JM_LOG_D("mqtt client init done");
-    return JM_SUCCESS;
-}
 
 int jm_mqtt_client_connect(const char *broker_host, uint16_t broker_port,
                             const char *client_id, uint16_t keepalive)
@@ -272,5 +182,100 @@ bool jm_mqtt_client_is_connected(void)
 {
     return g_connected;
 }
+
+void jm_mqtt_client_on_serial_data(const uint8_t *data, uint16_t len)
+{
+    if (!g_initialized || len < 2) return;
+
+    uint8_t cmd = data[0];
+    const uint8_t *payload = data + 1;
+    uint16_t payload_len = len - 1;
+
+    JM_LOG_D("OSerialDa");
+
+    switch (cmd) {
+        case JM_MQTT_CLIENT_RSP_CONNECT:
+            if (payload_len >= 1 && payload[0] == 0) {
+                g_connected = true;
+                g_connecting = false;
+                JM_LOG_D("mqtt client connected");
+                if (g_connect_cb) g_connect_cb();
+            } else {
+                g_connecting = false;
+                JM_LOG_E("mqtt client connect failed");
+            }
+            break;
+
+        case JM_MQTT_CLIENT_RSP_PUBLISH:
+            JM_LOG_D("mqtt client publish rsp");
+            break;
+
+        case JM_MQTT_CLIENT_RSP_SUBSCRIBE:
+            JM_LOG_D("mqtt client subscribe rsp");
+            break;
+
+        case JM_MQTT_CLIENT_EVT_MESSAGE:
+            if (payload_len >= 4) {
+                jm_buf_t *buf = jm_buf_wrap_array(payload, payload_len);
+                if (!buf) break;
+
+                int8_t flag = 0;
+                char *topic = jm_buf_read_string(buf, &flag);
+                if (!topic || flag <= 0) {
+                    jm_buf_release(buf);
+                    break;
+                }
+
+                uint16_t msg_payload_len = 0;
+                if (!jm_buf_get_u16(buf, &msg_payload_len)) {
+                    free(topic);
+                    jm_buf_release(buf);
+                    break;
+                }
+
+                if (msg_payload_len > jm_buf_readable_len(buf)) {
+                    free(topic);
+                    jm_buf_release(buf);
+                    break;
+                }
+
+                if (g_msg_cb) {
+                    const uint8_t *msg_payload = jm_buf_read_buf(buf);
+                    g_msg_cb(topic, msg_payload, msg_payload_len);
+                }
+
+                free(topic);
+                jm_buf_release(buf);
+            }
+            break;
+
+        case JM_MQTT_CLIENT_EVT_DISCONNECTED:
+            g_connected = false;
+            g_connecting = false;
+            JM_LOG_D("mqtt client disconnected");
+            if (g_disconnect_cb) g_disconnect_cb();
+            break;
+
+        default:
+            break;
+    }
+}
+
+int jm_mqtt_client_init(jm_mqtt_client_msg_cb msg_cb,
+                         jm_mqtt_client_connect_cb connect_cb,
+                         jm_mqtt_client_disconnect_cb disconnect_cb)
+{
+    g_msg_cb = msg_cb;
+    g_connect_cb = connect_cb;
+    g_disconnect_cb = disconnect_cb;
+    g_initialized = true;
+    g_connected = false;
+    g_connecting = false;
+    g_rx_len = 0;
+
+    JM_LOG_D("mqtt client init done");
+    return JM_SUCCESS;
+}
+
 
 #endif //#if JM_MQTT_CLIENT_ENABLE

@@ -16,7 +16,7 @@
 #define MQTT_SUB_TOPIC       "stm32/test"
 #define MQTT_PUB_TOPIC       "stm32/test"
 #define MQTT_PUB_MSG         "Hello from STM32 MQTT client"
-#define MQTT_TEST_BTN_PIN    1
+#define MQTT_TEST_BTN_PIN    0
 #define BTN_DEBOUNCE_MS      70
 
 static uint8_t g_mqtt_connected = 0;
@@ -27,28 +27,30 @@ static uint32_t g_btn_last_time = 0;
 static uint8_t g_btn_last_state = 1;
 static uint8_t g_btn_triggered = 0;
 
+static bool inited = false;
+
 static void button_init(void)
 {
 #if defined(USE_HAL_UART)
     GPIO_InitTypeDef GPIO_InitStruct = {0};
-    GPIO_InitStruct.Pin = GPIO_PIN_1;
+    GPIO_InitStruct.Pin = GPIO_PIN_0;
     GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
     GPIO_InitStruct.Pull = GPIO_PULLUP;
     HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 #else
     RCC->APB2ENR |= RCC_APB2ENR_IOPAEN;
-    GPIOA->CRL &= ~(0xF << 4);
-    GPIOA->CRL |= (0x8 << 4);
-    GPIOA->ODR |= (1 << 1);
+    GPIOA->CRL &= ~(0xF << 0);
+    GPIOA->CRL |= (0x8 << 0);
+    GPIOA->ODR |= (1 << 0);
 #endif
 }
 
 static uint8_t button_read(void)
 {
 #if defined(USE_HAL_UART)
-    return HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_1) ? 1 : 0;
+    return HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_0) ? 1 : 0;
 #else
-    return (GPIOA->IDR & (1 << 1)) ? 1 : 0;
+    return (GPIOA->IDR & (1 << 0)) ? 1 : 0;
 #endif
 }
 
@@ -74,28 +76,36 @@ static void mqtt_client_disconnect_callback(void) {
 }
 
 void jm_mqtt_client_test_init(const jm_config_t *config) {
-
     jm_mqtt_client_init(mqtt_client_message_callback,
                         mqtt_client_connect_callback,
                         mqtt_client_disconnect_callback);
-
-    button_init();
-
-    JM_LOG_D("MQTT inito %s:%d", MQTT_BROKER_HOST, MQTT_BROKER_PORT);
-
-    int rc = jm_mqtt_client_connect(MQTT_BROKER_HOST, MQTT_BROKER_PORT,
-                                    MQTT_CLIENT_ID, MQTT_KEEPALIVE);
-    if (rc != JM_SUCCESS) {
-        JM_LOG_E("MQTT client connect failed rc=%d", rc);
-    }
 }
 
 void jm_mqtt_client_test_loop(void) {
-   
-    if (!g_mqtt_connected) {
+
+    if(!inited) {
+        button_init();
+        JM_LOG_D("MQTT inito %s:%d", MQTT_BROKER_HOST, MQTT_BROKER_PORT);
+
+        int rc = jm_mqtt_client_connect(MQTT_BROKER_HOST, MQTT_BROKER_PORT,
+                                        MQTT_CLIENT_ID, MQTT_KEEPALIVE);
+
+        JM_LOG_D("mqcR");
+
+        if (rc != JM_SUCCESS) {
+            JM_LOG_E("MQTT client connect failed rc=%d", rc);
+        }
+        inited = true;
         return;
     }
- //JM_LOG_E("test_loop");
+
+
+    if (!g_mqtt_connected) {
+        // JM_LOG_E("C");
+        return;
+    }
+
+    //JM_LOG_E("test_loop");
     uint32_t now = jm_stm32_get_time();
     uint8_t state = button_read();
 
@@ -104,6 +114,7 @@ void jm_mqtt_client_test_loop(void) {
             g_btn_last_time = now;
             g_btn_triggered = 1;
 
+            JM_LOG_D("_publis1");
             int rc = jm_mqtt_client_publish(MQTT_PUB_TOPIC,
                                             (const uint8_t *)MQTT_PUB_MSG,
                                             strlen(MQTT_PUB_MSG), 0, false);
@@ -120,6 +131,7 @@ void jm_mqtt_client_test_loop(void) {
     g_btn_last_state = state;
 
     if (!g_subscribed && (now - g_last_sub_time > 1000)) {
+        JM_LOG_D("subtop");
         g_last_sub_time = now;
         int rc = jm_mqtt_client_subscribe(MQTT_SUB_TOPIC, 0);
         if (rc == JM_SUCCESS) {
@@ -128,8 +140,11 @@ void jm_mqtt_client_test_loop(void) {
         }
     }
 
+    //JM_LOG_E("ptier %u %u %u",now, g_last_pub_time, now - g_last_pub_time);
+
     if (now - g_last_pub_time > 10000) {
         g_last_pub_time = now;
+        JM_LOG_D("_publiAuto");
         int rc = jm_mqtt_client_publish(MQTT_PUB_TOPIC,
                                         (const uint8_t *)MQTT_PUB_MSG,
                                         strlen(MQTT_PUB_MSG), 0, false);
@@ -139,6 +154,7 @@ void jm_mqtt_client_test_loop(void) {
     }
 
     jm_mqtt_client_loop();
+    
 }
 
 #endif

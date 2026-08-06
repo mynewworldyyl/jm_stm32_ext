@@ -904,6 +904,7 @@ uint32_t jm_stm32_get_time(void) {
 int jm_stm32_init(const jm_config_t *config)
 {
     if (!config || !config->get_sys_time_ms || !config->uart_send) {
+        JM_LOG_LINE("InvCfg");
         return JM_ERR_NOT_READY;
     }
 
@@ -912,7 +913,11 @@ int jm_stm32_init(const jm_config_t *config)
     g_ctx.config = config;
     g_ctx.initialized = true;
 
+    JM_LOG_LINE("init stm32");
+
     jm_comp_init(config);
+
+    JM_LOG_LINE("init end");
 
     return JM_SUCCESS;
 }
@@ -955,16 +960,17 @@ void jm_stm32_uart_rx_byte(uint8_t byte)
         g_ctx.rx.req_id = 0;
         g_ctx.rx.wpos = 0;
         g_ctx.rx.cheader = 0;
-
+         JM_LOG_D("ClsBuf");
     }
     g_ctx.rx.last_recv_time = now;
 
     if (g_ctx.rx.ds == 0) {
-
         if(g_ctx.rx.cheader == PCK_HEANDER) {
             g_ctx.rx.data_size = (uint16_t)byte << 8;
             g_ctx.rx.ds = 1;
-        }else {
+            g_ctx.rx.cheader =0;
+        } else {
+            JM_LOG_D("GPH %x",byte);
             g_ctx.rx.cheader = byte;
         }
         return;
@@ -989,13 +995,17 @@ void jm_stm32_uart_rx_byte(uint8_t byte)
     if (g_ctx.rx.req_id == 0) {
         if (g_ctx.rx.data_size != 1) {
             g_ctx.rx.last_recv_time = 1;
+            JM_LOG_D("InvPck");
             return;
         }
+
+        JM_LOG_D("Gcpk=%d",byte);
         g_ctx.rx.ack_req_id = byte;
         g_ctx.rx.data_size = 0;
         g_ctx.rx.recv_size = 0;
         g_ctx.rx.ds = 0;
         g_ctx.rx.req_id = 0;
+        g_ctx.rx.cheader = 0;
         return;
     }
 
@@ -1006,6 +1016,7 @@ void jm_stm32_uart_rx_byte(uint8_t byte)
             g_ctx.rx.recv_size = 0;
             g_ctx.rx.ds = 0;
             g_ctx.rx.req_id = 0;
+            JM_LOG_E("MER");
             return;
         }
     }
@@ -1020,22 +1031,25 @@ void jm_stm32_uart_rx_byte(uint8_t byte)
     g_ctx.rx.recv_size++;
 
     if (g_ctx.rx.recv_size == g_ctx.rx.data_size) {
-        g_ctx.rx.cheader = 0; //重置包头
-
+        
         if (g_ctx.rx.req_id > 1) {
-            uint8_t ack_pkt[4] = {0, 1, 0, g_ctx.rx.req_id};
+           // jm_delay_ms(2);
+            uint8_t ack_pkt[] = {PCK_HEANDER, 0, 1, 0, g_ctx.rx.req_id};
             g_ctx.config->uart_send(ack_pkt, sizeof(ack_pkt));
+           // g_ctx.config->uart_send(ack_pkt, sizeof(ack_pkt));
+            JM_LOG_D("cfp %d s=%d",g_ctx.rx.req_id,sizeof(ack_pkt) );
 
-             JM_LOG_D("cfp %d",g_ctx.rx.req_id );
+            //for (volatile int i = 0; i < 5000; i++);
 
-            for (volatile int i = 0; i < 5000; i++);
-
-            __DSB();  // Data Synchronization Barrier
-            __ISB();  // Instruction Synchronization Barrier
+           // __DSB();  // Data Synchronization Barrier
+           // __ISB();  // Instruction Synchronization Barrier
 
         }else {
             JM_LOG_D("noCfg %d",g_ctx.rx.req_id );
         }
+
+        JM_LOG_D("oP %d",g_ctx.rx.req_id);
+        g_ctx.rx.cheader = 0; //重置包头
 
         uint16_t payload_len = jm_buf_readable_len(g_ctx.rx.assembling_buf);
         const uint8_t *payload = jm_buf_read_buf(g_ctx.rx.assembling_buf);
@@ -1194,7 +1208,7 @@ static int jm_send_serial_packet(uint16_t subtype, uint16_t msg_id, const uint8_
 
     uint8_t data[] = { PCK_HEANDER, byte0, byte1, reqId};
     g_ctx.config->uart_send(data, sizeof(data)); //协议请求ID,如果reqId为0，则表示是对方返回的确认包
-    JM_LOG_D("sd [%x,%x,%x,%x,%x,%x,%x]", data[0], data[1], data[2], data[3]); 
+    JM_LOG_D("sd [%x,%x,%x,%x,%x,%x,%x]", data[0], data[1], data[2], data[3],buf->data[0],buf->data[1],buf->data[2]); 
 
     g_ctx.config->uart_send(buf->data, jm_buf_readable_len(buf));
 

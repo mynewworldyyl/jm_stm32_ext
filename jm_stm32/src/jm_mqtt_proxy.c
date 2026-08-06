@@ -67,7 +67,7 @@ static int jm_mqtt_send_packet(jm_mqtt_client_t *client, const uint8_t *data, ui
     uint8_t byte1 = total_len & 0xFF;
     uint8_t reqId = jm_stm32_next_req_id();
 
-    uint8_t header[3] = {byte0, byte1, reqId};
+    uint8_t header[] = {PCK_HEANDER, byte0, byte1, reqId};
     g_mqtt_config->uart_send(header, sizeof(header));
     g_mqtt_config->uart_send(jm_buf_read_buf(buf), head_len);
     g_mqtt_config->uart_send(data, len);
