@@ -970,7 +970,7 @@ void jm_stm32_uart_rx_byte(uint8_t byte)
             g_ctx.rx.ds = 1;
             g_ctx.rx.cheader =0;
         } else {
-            JM_LOG_D("GPH %x",byte);
+            //JM_LOG_D("GPH %x",byte);
             g_ctx.rx.cheader = byte;
         }
         return;
@@ -999,7 +999,7 @@ void jm_stm32_uart_rx_byte(uint8_t byte)
             return;
         }
 
-        JM_LOG_D("Gcpk=%d",byte);
+        //JM_LOG_D("Gcpk=%d",byte);
         g_ctx.rx.ack_req_id = byte;
         g_ctx.rx.data_size = 0;
         g_ctx.rx.recv_size = 0;
@@ -1037,7 +1037,7 @@ void jm_stm32_uart_rx_byte(uint8_t byte)
             uint8_t ack_pkt[] = {PCK_HEANDER, 0, 1, 0, g_ctx.rx.req_id};
             g_ctx.config->uart_send(ack_pkt, sizeof(ack_pkt));
            // g_ctx.config->uart_send(ack_pkt, sizeof(ack_pkt));
-            JM_LOG_D("cfp %d s=%d",g_ctx.rx.req_id,sizeof(ack_pkt) );
+            //JM_LOG_D("cfp %d s=%d",g_ctx.rx.req_id,sizeof(ack_pkt) );
 
             //for (volatile int i = 0; i < 5000; i++);
 
@@ -1048,7 +1048,7 @@ void jm_stm32_uart_rx_byte(uint8_t byte)
             JM_LOG_D("noCfg %d",g_ctx.rx.req_id );
         }
 
-        JM_LOG_D("oP %d",g_ctx.rx.req_id);
+        //JM_LOG_D("oP %d",g_ctx.rx.req_id);
         g_ctx.rx.cheader = 0; //重置包头
 
         uint16_t payload_len = jm_buf_readable_len(g_ctx.rx.assembling_buf);

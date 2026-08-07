@@ -52,7 +52,8 @@ static int jm_mqtt_client_send_cmd(uint8_t cmd, const uint8_t *data, uint16_t da
 
 
 int jm_mqtt_client_connect(const char *broker_host, uint16_t broker_port,
-                            const char *client_id, uint16_t keepalive)
+                            const char *client_id, uint16_t keepalive,
+                            const char *username, const char *password)
 {
     if (!g_initialized) return JM_ERR_NOT_READY;
     if (!broker_host || strlen(broker_host) >= JM_MQTT_CLIENT_MAX_BROKER_LEN) {
@@ -77,8 +78,18 @@ int jm_mqtt_client_connect(const char *broker_host, uint16_t broker_port,
     jm_buf_write_string(buf, g_broker_host, (uint16_t)strlen(g_broker_host));
     jm_buf_put_u16(buf, g_broker_port);
     jm_buf_write_string(buf, g_client_id, (uint16_t)strlen(g_client_id));
-   
     jm_buf_put_u16(buf, g_keepalive);
+
+    uint16_t username_len = username ? (uint16_t)strlen(username) : 0;
+    uint16_t password_len = password ? (uint16_t)strlen(password) : 0;
+    jm_buf_put_u16(buf, username_len);
+    jm_buf_put_u16(buf, password_len);
+    if (username_len > 0) {
+        jm_buf_put_bytes(buf, (const uint8_t*)username, username_len);
+    }
+    if (password_len > 0) {
+        jm_buf_put_bytes(buf, (const uint8_t*)password, password_len);
+    }
 
     uint16_t payload_len = jm_buf_readable_len(buf);
     const uint8_t *payload = jm_buf_read_buf(buf);
@@ -103,14 +114,21 @@ int jm_mqtt_client_publish(const char *topic, const uint8_t *payload, uint16_t l
     if (len > JM_MQTT_CLIENT_MAX_PAYLOAD_LEN) return JM_ERR_INVALID_PACKET;
     if (qos > 2) qos = 0;
 
-    jm_buf_t *buf = jm_buf_create(strlen(topic) + len + 4);
+    jm_buf_t *buf = jm_buf_create(strlen(topic) + len + 5);
     if (!buf) return JM_ERR_MEMORY;
 
     jm_buf_write_string(buf, topic, (uint16_t)strlen(topic));
     jm_buf_put_u8(buf, qos);
     jm_buf_put_u8(buf, retained ? 1 : 0);
+
     jm_buf_put_u16(buf, len);
+
+   // uint16_t pos = buf->wpos;
+
     jm_buf_put_bytes(buf, payload, len);
+
+   // JM_LOG_D("pub pl=%s",(char*)buf->data + pos);
+  //  JM_LOG_D("pub len=%d pl=%s",len, (char*)payload);
 
     uint16_t payload_len = jm_buf_readable_len(buf);
     const uint8_t *data = jm_buf_read_buf(buf);
@@ -228,12 +246,6 @@ void jm_mqtt_client_on_serial_data(const uint8_t *data, uint16_t len)
 
                 uint16_t msg_payload_len = 0;
                 if (!jm_buf_get_u16(buf, &msg_payload_len)) {
-                    free(topic);
-                    jm_buf_release(buf);
-                    break;
-                }
-
-                if (msg_payload_len > jm_buf_readable_len(buf)) {
                     free(topic);
                     jm_buf_release(buf);
                     break;

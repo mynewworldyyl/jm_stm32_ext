@@ -56,10 +56,8 @@ static uint8_t button_read(void)
 
 static void mqtt_client_message_callback(const char *topic, const uint8_t *payload, uint16_t len) {
     JM_LOG_D("MQTT client RX: topic=%s len=%u", topic, len);
-    for (uint16_t i = 0; i < len; i++) {
-        jm_log_char((char)payload[i]);
-    }
-    jm_log_char('\n');
+    //*(payload+len) = '\0';
+    JM_LOG_D("Pl=%s", (char*)payload);
 }
 
 static void mqtt_client_connect_callback(void) {
@@ -88,7 +86,8 @@ void jm_mqtt_client_test_loop(void) {
         JM_LOG_D("MQTT inito %s:%d", MQTT_BROKER_HOST, MQTT_BROKER_PORT);
 
         int rc = jm_mqtt_client_connect(MQTT_BROKER_HOST, MQTT_BROKER_PORT,
-                                        MQTT_CLIENT_ID, MQTT_KEEPALIVE);
+                                        MQTT_CLIENT_ID, MQTT_KEEPALIVE,
+                                        "jmicro", "jmicro123");
 
         JM_LOG_D("mqcR");
 
@@ -114,21 +113,32 @@ void jm_mqtt_client_test_loop(void) {
             g_btn_last_time = now;
             g_btn_triggered = 1;
 
-            JM_LOG_D("_publis1");
-            int rc = jm_mqtt_client_publish(MQTT_PUB_TOPIC,
+            int rc = jm_mqtt_client_publish(MQTT_SUB_TOPIC,
                                             (const uint8_t *)MQTT_PUB_MSG,
-                                            strlen(MQTT_PUB_MSG), 0, false);
+                                            strlen(MQTT_PUB_MSG)+1, //包手字符串结尾字符
+                                            0, false);
             if (rc == JM_SUCCESS) {
-                JM_LOG_D("MQTT client: button publish to %s", MQTT_PUB_TOPIC);
+                JM_LOG_D("MQTT client: button publish to %s", MQTT_SUB_TOPIC);
             } else {
                 JM_LOG_E("MQTT client: button publish failed rc=%d", rc);
             }
+
+            /*
+            JM_LOG_D("subtop");
+            g_last_sub_time = now;
+            int rc = jm_mqtt_client_subscribe(MQTT_SUB_TOPIC, 0);
+            if (rc == JM_SUCCESS) {
+                JM_LOG_D("MQTT client: subscribed to %s", MQTT_SUB_TOPIC);
+                g_subscribed = 1;
+            }*/
+            
         }
     }
     if (state == 1) {
         g_btn_triggered = 0;
     }
     g_btn_last_state = state;
+
 
     if (!g_subscribed && (now - g_last_sub_time > 1000)) {
         JM_LOG_D("subtop");
@@ -141,7 +151,7 @@ void jm_mqtt_client_test_loop(void) {
     }
 
     //JM_LOG_E("ptier %u %u %u",now, g_last_pub_time, now - g_last_pub_time);
-
+/*
     if (now - g_last_pub_time > 10000) {
         g_last_pub_time = now;
         JM_LOG_D("_publiAuto");
@@ -152,7 +162,7 @@ void jm_mqtt_client_test_loop(void) {
             JM_LOG_D("MQTT client: published to %s", MQTT_PUB_TOPIC);
         }
     }
-
+*/
     jm_mqtt_client_loop();
     
 }

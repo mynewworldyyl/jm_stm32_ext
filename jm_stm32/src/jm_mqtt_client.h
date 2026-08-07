@@ -38,7 +38,8 @@ int jm_mqtt_client_init(jm_mqtt_client_msg_cb msg_cb,
                          jm_mqtt_client_connect_cb connect_cb,
                          jm_mqtt_client_disconnect_cb disconnect_cb);
 int jm_mqtt_client_connect(const char *broker_host, uint16_t broker_port,
-                            const char *client_id, uint16_t keepalive);
+                            const char *client_id, uint16_t keepalive,
+                            const char *username, const char *password);
 int jm_mqtt_client_publish(const char *topic, const uint8_t *payload, uint16_t len,
                             uint8_t qos, bool retained);
 int jm_mqtt_client_subscribe(const char *topic, uint8_t qos);

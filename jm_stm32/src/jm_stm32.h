@@ -92,6 +92,9 @@ void jm_log_print(const char *format, ...);
 
 #include <stdarg.h>
 
+#define JM_LOG(format, ...) \
+    do { jm_log_print((const char*)format, ## __VA_ARGS__);} while(0)
+
 #define JM_LOG_LINE(format, ...) \
     do { jm_log_print((const char*)format, ## __VA_ARGS__); jm_log_char('\n'); } while(0)
 
