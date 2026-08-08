@@ -1156,7 +1156,7 @@ static int jm_send_other_packet(uint8_t type, const uint8_t *payload, uint16_t p
     uint8_t data[] = { PCK_HEANDER, byte0, byte1, reqId, 0, 0, JM_SDADA_CHECK_NUM, type};
     g_ctx.config->uart_send(data, sizeof(data)); //协议请求ID,如果reqId为0，则表示是对方返回的确认包
 
-    JM_LOG_D("sd [%x,%x,%x,%x,%x,%x,%x]", data[0], data[1], data[2], data[3],data[4],data[5],data[6],data[7]); 
+    //JM_LOG_D("sd [%x,%x,%x,%x,%x,%x,%x]", data[0], data[1], data[2], data[3],data[4],data[5],data[6],data[7]); 
 
    // g_ctx.config->uart_send(data, 4);
 
@@ -1208,7 +1208,7 @@ static int jm_send_serial_packet(uint16_t subtype, uint16_t msg_id, const uint8_
 
     uint8_t data[] = { PCK_HEANDER, byte0, byte1, reqId};
     g_ctx.config->uart_send(data, sizeof(data)); //协议请求ID,如果reqId为0，则表示是对方返回的确认包
-    JM_LOG_D("sd [%x,%x,%x,%x,%x,%x,%x]", data[0], data[1], data[2], data[3],buf->data[0],buf->data[1],buf->data[2]); 
+    //JM_LOG_D("sd [%x,%x,%x,%x,%x,%x,%x]", data[0], data[1], data[2], data[3],buf->data[0],buf->data[1],buf->data[2]); 
 
     g_ctx.config->uart_send(buf->data, jm_buf_readable_len(buf));
 
@@ -1352,7 +1352,7 @@ int jm_stm32_send_tcp_data(int8_t sock, const uint8_t *payload, uint16_t plen)
         sock //socket连接标识
     };
 
-    JM_LOG_D("sd [%x,%x,%x,%x,%x,%x,%x]",data[0], data[1], data[2], data[3], data[4], data[5], data[6], data[7]); 
+    //JM_LOG_D("sd [%x,%x,%x,%x,%x,%x,%x]",data[0], data[1], data[2], data[3], data[4], data[5], data[6], data[7]); 
 
     g_ctx.config->uart_send(data, sizeof(data));//协议请求ID,如果reqId为0，则表示是对方返回的确认包
 

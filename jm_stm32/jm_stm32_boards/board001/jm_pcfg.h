@@ -6,16 +6,13 @@
 #define JM_LOG_ERROR_ENABLE 1
 
 //启用事件模块
-#define JM_STM32_EVENT_ENABLE 0
+#define JM_STM32_EVENT_ENABLE 1
 
 //启用中断模块
-#define JM_STM32_INTERRUPT_ENABLE 0
+#define JM_STM32_INTERRUPT_ENABLE 1
 
 //启用音调模块
-#define JM_TONE_ENABLE 0
-
-//启用全局中断控制API（noInterrupts/interrupts）
-#define JM_STM32_INTERRUPTS_ENABLE 0
+#define JM_TONE_ENABLE 1
 
 //启用AT24CXX EEPROM I2C操作
 #define JM_AT24CXX_ENABLE 0
