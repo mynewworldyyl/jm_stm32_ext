@@ -1,3 +1,39 @@
+/**
+ * @file jm_stm32_udp_test.c
+ * @brief UDP 收发测试/示例模块
+ * UdpServer.java是本样例的服务端实现，仅用于测试，完成具体功能需要根据需求修改
+ * 
+ * 本模块演示如何通过 jm_stm32 库向 ESP8266 netproxy 发送 UDP 数据，
+ * 以及接收 UDP 数据上行事件。
+ *
+ * @section 集成步骤
+ * 1. 在 `jm_pcfg.h` 中启用本模块：
+ *    @code
+ *    #define JM_STM32_TESTUDP_ENABLE 1
+ *    @endcode
+ *
+ * 2. 将本文件添加到工程源文件列表。
+ *
+ * 3. 在 `main.c` 的 `on_event()` 回调中添加 UDP 事件分发：
+ *    @code
+ *    case JM_EVENT_UDP_DATA:
+ *        jm_udp_test_on_event(event_type, data);
+ *        break;
+ *    @endcode
+ *
+ * 4. 在 `main.c` 的主循环中调用轮询函数：
+ *    @code
+ *    jm_udp_test_loop();
+ *    @endcode
+ *    或通过 `@ref jm_comp_loop` 自动调用。
+ *
+ * @section 使用说明
+ * - 按下 GPIO 按键 (PA0) 向 @ref UDP_TEST_HOST:@ref UDP_TEST_PORT 发送 UDP 数据包
+ * - 通过 ESP8266 netproxy 透传，目标服务器可接收到 STM32 发送的 UDP 数据
+ * - 收到 UDP 数据通过 @ref JM_EVENT_UDP_DATA 事件上报
+ * - 接收到的数据通过日志串口打印输出
+ */
+
 #include "jm_stm32.h"
 #include <string.h>
 
@@ -7,20 +43,24 @@
 
 #if JM_STM32_TESTUDP_ENABLE
 
-#define UDP_TEST_HOST      "192.168.3.10"
-#define UDP_TEST_PORT      9999
-#define UDP_TEST_BTN_PIN   0
-#define BTN_DEBOUNCE_MS    70
+#define UDP_TEST_HOST      "192.168.3.10"  /**< UDP 目标服务器地址 */
+#define UDP_TEST_PORT      9999            /**< UDP 目标服务器端口 */
+#define UDP_TEST_BTN_PIN   0               /**< 按键引脚编号 (PA0) */
+#define BTN_DEBOUNCE_MS    70              /**< 按键去抵抗时间（ms） */
 
+/** @brief UDP 测试上下文 */
 typedef struct {
-    uint32_t btn_last_time;
-    uint8_t btn_last_state;
-    uint8_t btn_triggered;
-    uint32_t (*get_time_ms)(void);
+    uint32_t btn_last_time;       /**< 上次按键触发时间 */
+    uint8_t btn_last_state;       /**< 上次按键状态 */
+    uint8_t btn_triggered;        /**< 按键触发标志 */
+    uint32_t (*get_time_ms)(void); /**< 获取系统时间回调 */
 } udp_test_ctx_t;
 
 static udp_test_ctx_t g_udp_test;
 
+/* ===================== 按键初始化 ===================== */
+
+/** @brief 初始化按键引脚 (PA0 为上拉输入) */
 static void button_init(void)
 {
 #if defined(USE_HAL_UART)
@@ -37,6 +77,10 @@ static void button_init(void)
 #endif
 }
 
+/**
+ * @brief 读取按键状态
+ * @return 1=按下，0=释放
+ */
 static uint8_t button_read(void)
 {
 #if defined(USE_HAL_UART)
@@ -46,6 +90,15 @@ static uint8_t button_read(void)
 #endif
 }
 
+/**
+ * @brief UDP 事件处理回调
+ *
+ * 处理 UDP 数据接收事件。
+ * 应在 `on_event()` 中调用此函数分发 UDP 相关事件。
+ *
+ * @param event_type 事件类型（@ref JM_EVENT_UDP_DATA）
+ * @param data       事件数据 (jm_buf_t*)
+ */
 void jm_udp_test_on_event(uint8_t event_type, jm_buf_t *data)
 {
     switch (event_type) {
@@ -63,6 +116,10 @@ void jm_udp_test_on_event(uint8_t event_type, jm_buf_t *data)
     }
 }
 
+/**
+ * @brief UDP 测试模块初始化
+ * @param config jm_stm32 配置结构
+ */
 void jm_udp_test_init(const jm_config_t *config)
 {
     memset(&g_udp_test, 0, sizeof(g_udp_test));
@@ -74,6 +131,12 @@ void jm_udp_test_init(const jm_config_t *config)
     JM_LOG_D("UDP_TEST: init done");
 }
 
+/**
+ * @brief UDP 测试模块轮询
+ *
+ * 检测按键状态，触发 UDP 数据发送。
+ * 应在主循环中周期性调用。
+ */
 void jm_udp_test_loop(void)
 {
     if (!g_udp_test.get_time_ms) return;

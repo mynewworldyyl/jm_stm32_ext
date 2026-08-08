@@ -1,9 +1,19 @@
+/**
+ * @file jm_mqtt_client.c
+ * @brief 轻量级 MQTT 客户端实现
+ *
+ * 通过 ESP8266 netproxy 的 MQTT 代理功能，STM32 端不需要运行完整的 MQTT 协议栈。
+ * 所有 MQTT 操作通过串口发送 AT-style 命令到 ESP8266，由 ESP8266 完成实际的 MQTT 协议处理。
+ */
+
 #include "jm_mqtt_client.h"
 #include "jm_stm32.h"
 #include <string.h>
 #include <stdio.h>
 
 #if JM_MQTT_CLIENT_ENABLE
+
+/* ===================== 全局状态 ===================== */
 
 static jm_mqtt_client_msg_cb g_msg_cb = NULL;
 static jm_mqtt_client_connect_cb g_connect_cb = NULL;
@@ -51,6 +61,16 @@ static int jm_mqtt_client_send_cmd(uint8_t cmd, const uint8_t *data, uint16_t da
 
 
 
+/**
+ * @brief 连接到 MQTT 服务器
+ * @param broker_host 服务器地址
+ * @param broker_port 服务器端口
+ * @param client_id   客户端 ID
+ * @param keepalive   心跳间隔（秒）
+ * @param username    用户名（可为 NULL）
+ * @param password    密码（可为 NULL）
+ * @return @ref JM_SUCCESS 成功
+ */
 int jm_mqtt_client_connect(const char *broker_host, uint16_t broker_port,
                             const char *client_id, uint16_t keepalive,
                             const char *username, const char *password)
@@ -106,6 +126,15 @@ int jm_mqtt_client_connect(const char *broker_host, uint16_t broker_port,
     return rc;
 }
 
+/**
+ * @brief 发布消息到主题
+ * @param topic   主题
+ * @param payload 负载数据
+ * @param len     负载长度
+ * @param qos     QoS 等级（0/1/2）
+ * @param retained 是否保留消息
+ * @return @ref JM_SUCCESS 成功
+ */
 int jm_mqtt_client_publish(const char *topic, const uint8_t *payload, uint16_t len,
                             uint8_t qos, bool retained)
 {
@@ -137,6 +166,12 @@ int jm_mqtt_client_publish(const char *topic, const uint8_t *payload, uint16_t l
     return rc;
 }
 
+/**
+ * @brief 订阅主题
+ * @param topic 主题
+ * @param qos   QoS 等级（0/1）
+ * @return @ref JM_SUCCESS 成功
+ */
 int jm_mqtt_client_subscribe(const char *topic, uint8_t qos)
 {
     if (!g_initialized || !g_connected) return JM_ERR_NOT_READY;
@@ -156,6 +191,11 @@ int jm_mqtt_client_subscribe(const char *topic, uint8_t qos)
     return rc;
 }
 
+/**
+ * @brief 取消订阅主题
+ * @param topic 主题
+ * @return @ref JM_SUCCESS 成功
+ */
 int jm_mqtt_client_unsubscribe(const char *topic)
 {
     if (!g_initialized || !g_connected) return JM_ERR_NOT_READY;
@@ -173,6 +213,10 @@ int jm_mqtt_client_unsubscribe(const char *topic)
     return rc;
 }
 
+/**
+ * @brief 断开 MQTT 连接
+ * @return @ref JM_SUCCESS 成功
+ */
 int jm_mqtt_client_disconnect(void)
 {
     if (!g_initialized) return JM_ERR_NOT_READY;
@@ -182,6 +226,9 @@ int jm_mqtt_client_disconnect(void)
     return jm_mqtt_client_send_cmd(JM_MQTT_CLIENT_CMD_DISCONNECT, NULL, 0);
 }
 
+/**
+ * @brief MQTT 客户端轮询（处理连接超时等）
+ */
 void jm_mqtt_client_loop(void)
 {
     if (!g_initialized) return;
@@ -196,11 +243,20 @@ void jm_mqtt_client_loop(void)
     }
 }
 
+/**
+ * @brief 检查是否已连接到服务器
+ * @return true 已连接
+ */
 bool jm_mqtt_client_is_connected(void)
 {
     return g_connected;
 }
 
+/**
+ * @brief 处理从 ESP8266 收到的 MQTT 串口数据
+ * @param data 数据指针
+ * @param len  数据长度
+ */
 void jm_mqtt_client_on_serial_data(const uint8_t *data, uint16_t len)
 {
     if (!g_initialized || len < 2) return;
@@ -209,7 +265,7 @@ void jm_mqtt_client_on_serial_data(const uint8_t *data, uint16_t len)
     const uint8_t *payload = data + 1;
     uint16_t payload_len = len - 1;
 
-    JM_LOG_D("OSerialDa");
+    JM_LOG_D("sd cmd=%d",cmd);
 
     switch (cmd) {
         case JM_MQTT_CLIENT_RSP_CONNECT:
@@ -273,6 +329,13 @@ void jm_mqtt_client_on_serial_data(const uint8_t *data, uint16_t len)
     }
 }
 
+/**
+ * @brief 初始化 MQTT 客户端
+ * @param msg_cb          消息到达回调
+ * @param connect_cb      连接成功回调
+ * @param disconnect_cb   断开连接回调
+ * @return @ref JM_SUCCESS 成功
+ */
 int jm_mqtt_client_init(jm_mqtt_client_msg_cb msg_cb,
                          jm_mqtt_client_connect_cb connect_cb,
                          jm_mqtt_client_disconnect_cb disconnect_cb)

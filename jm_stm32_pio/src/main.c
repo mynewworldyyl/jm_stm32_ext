@@ -1,3 +1,18 @@
+/**
+ * @file main.c
+ * @brief STM32 与 ESP8266 串口透传示例工程
+ *
+ * 通过 UART 与 ESP8266(netproxy)通信，实现 WiFi 连接、TCP/UDP/MQTT 等网络功能。
+ *
+ * 默认使用寄存器直驱（CMSIS）模式，无需 HAL 库。
+ * 如需使用 HAL 库模式，添加 `-DUSE_HAL_UART` 编译宏即可。
+ *
+ * 硬件连接：
+ * - PA9 (TX) / PA10 (RX) -> ESP8266 RXD / TXD  (USART1, 115200)
+ * - PA2 (TX) -> USB-TTL RXD  (USART2，用于日志输出)
+ * - GND 共地
+ */
+
 #include "jm_stm32.h"
 #include "jm_stm32_com.h"
 
@@ -8,19 +23,31 @@ extern UART_HandleTypeDef huart1;
 extern UART_HandleTypeDef huart2;
 #endif
 
-static volatile uint32_t sys_tick_ms = 0;
+static volatile uint32_t sys_tick_ms = 0;  /**< 系统毫秒计数器（寄存器直驱模式） */
 
+#if defined(USE_HAL_UART)
+
+/**
+ * @brief HAL 模式下的系统时钟配置
+ * @note 寄存器直驱模式下由 SystemClock_Config 实现
+ */
 #if defined(USE_HAL_UART)
 static uint32_t get_sys_time(void)
 {
     return HAL_GetTick();
 }
 
+/**
+ * @brief HAL 模式下通过 UART 发送数据
+ */
 static void uart_send(const uint8_t *data, uint16_t len)
 {
     HAL_UART_Transmit(&huart1, (uint8_t *)data, len, 100);
 }
 
+/**
+ * @brief HAL 模式下通过 USART2 发送日志
+ */
 static void uart_send_log(const uint8_t *data, uint16_t len)
 {
     HAL_UART_Transmit(&huart2, (uint8_t *)data, len, 100);
@@ -28,17 +55,27 @@ static void uart_send_log(const uint8_t *data, uint16_t len)
 #else
 #include "stm32f1xx.h"
 
+/* ===================== 寄存器直驱模式 ===================== */
+
+/**
+ * @brief 寄存器直驱模式的 SysTick 中断，每 1ms 递增
+ */
 void SysTick_Handler(void)
 {
     sys_tick_ms++;
-    //JM_LOG_D("s")
 }
 
+/**
+ * @brief 寄存器直驱模式下获取系统毫秒时间
+ */
 static uint32_t get_sys_time(void)
 {
     return sys_tick_ms;
 }
 
+/**
+ * @brief 寄存器直驱模式下通过 USART1 发送数据
+ */
 static void uart_send(const uint8_t *data, uint16_t len)
 {
     for (uint16_t i = 0; i < len; i++) {
@@ -46,9 +83,11 @@ static void uart_send(const uint8_t *data, uint16_t len)
         USART1->DR = data[i];
     }
     while (!(USART1->SR & USART_SR_TC));
-    
 }
 
+/**
+ * @brief 寄存器直驱模式下通过 USART2 发送日志
+ */
 static void uart_send_log(const uint8_t *data, uint16_t len)
 {
     for (uint16_t i = 0; i < len; i++) {
@@ -58,6 +97,11 @@ static void uart_send_log(const uint8_t *data, uint16_t len)
     //while (!(USART2->SR & USART_SR_TC));
 }
 
+/**
+ * @brief 寄存器直驱模式下 USART2（日志）初始化
+ *
+ * 配置 PA2 为 TX（复用推挽输出），波特率 115200，仅 TX。
+ */
 static void log_uart_init(void)
 {
     RCC->APB1ENR |= RCC_APB1ENR_USART2EN;
@@ -67,6 +111,12 @@ static void log_uart_init(void)
     USART2->CR1 = USART_CR1_TE | USART_CR1_UE;
 }
 
+/**
+ * @brief 寄存器直驱模式的系统时钟配置
+ *
+ * 配置 HSE 晶振为时钟源，PLL 倍频 9 倍，系统时钟 72MHz。
+ * APB1 预分频 2（36MHz），APB2 1 分频（72MHz）。
+ */
 static void SystemClock_Config(void)
 {
     RCC->CR |= RCC_CR_HSEON;
@@ -80,6 +130,17 @@ static void SystemClock_Config(void)
 }
 #endif
 
+/**
+ * @brief 事件回调函数
+ *
+ * 处理从 ESP8266 网卡下发的各种事件，包括 WiFi 状态、登录结果、
+ * TCP/UDP 数据、MQTT 消息等。
+ *
+ * @param event_type 事件类型（@ref JM_EVENT_*）
+ * @param sub_type   子类型
+ * @param data       事件数据
+ * @param user_data  用户自定义数据
+ */
 static void on_event(uint8_t event_type, uint16_t sub_type, void *data, void *user_data)
 {
     (void)sub_type;
@@ -126,6 +187,12 @@ static void on_event(uint8_t event_type, uint16_t sub_type, void *data, void *us
     }
 }
 
+/**
+ * @brief HAL 模式下的主函数
+ *
+ * 使用 HAL 库初始化系统、时钟、UART，注册回调后进入主循环。
+ * 在主循环中通过 jm_serial_read 轮询读取 UART 数据。
+ */
 #if defined(USE_HAL_UART)
 int main(void)
 {
@@ -153,7 +220,7 @@ int main(void)
 
     JM_LOG_D("jm_stm32 start");
 
-    //uint32_t last_log = get_sys_time();
+    /* 寄存器直驱模式主循环：无需轮询 UART，中断驱动接收 */
     while (1) {
         // uint32_t now = get_sys_time();
         // if (now - last_log >= 2000) {
@@ -167,6 +234,12 @@ int main(void)
     }
 }
 #else
+/**
+ * @brief 寄存器直驱模式下 USART1 初始化
+ *
+ * 配置 PA9 为 TX（复用推挽输出），PA10 为 RX（浮空输入），
+ * 波特率 115200，使能接收中断。
+ */
 static void uart_init(void)
 {
     RCC->APB2ENR |= RCC_APB2ENR_USART1EN | RCC_APB2ENR_IOPAEN;
@@ -176,6 +249,12 @@ static void uart_init(void)
     NVIC_EnableIRQ(USART1_IRQn);
 }
 
+/**
+ * @brief 寄存器直驱模式下的主函数
+ *
+ * 通过直接寄存器操作配置时钟、SysTick、UART，
+ * 使用中断接收 UART 数据，主循环仅调用 jm_stm32_loop。
+ */
 int main(void)
 {
     SystemClock_Config();
@@ -214,6 +293,12 @@ int main(void)
     }
 }
 
+/**
+ * @brief USART1 中断服务函数（寄存器直驱模式）
+ *
+ * 从 USART1 FIFO 读取收到的字节并推入 jm_stm32 接收缓冲区。
+ * ESP8266 通过 USART1 发送数据到 STM32。
+ */
 void USART1_IRQHandler(void)
 {
     if (USART1->SR & USART_SR_RXNE) {

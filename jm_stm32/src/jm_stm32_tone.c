@@ -1,3 +1,12 @@
+/**
+ * @file jm_stm32_tone.c
+ * @brief 蜂鸣器/音调、脉冲检测、移位寄存器、AT24CXX EEPROM、I2C 接口实现
+ *
+ * 使用寄存器直驱方式，无需 HAL 库。
+ * 受 @ref JM_TONE_ENABLE、@ref JM_AT24CXX_ENABLE、
+ * @ref JM_I2C_WRAPPER_ENABLE 宏控制编译。
+ */
+
 #include "jm_stm32.h"
 #include "jm_stm32_com.h"
 
@@ -7,14 +16,25 @@
 #include <stm32f1xx.h>
 #endif
 
+/** @brief 系统时钟频率（Hz） */
 #define SYSTEM_CLOCK 72000000
 
+/**
+ * @brief 将引脚编号映射到 GPIO 端口
+ * @param pin 引脚编号
+ * @return 端口指针，无效返回 NULL
+ */
 static GPIO_TypeDef *pin_to_port(uint32_t pin) {
     if (pin < 16) return GPIOA;
     else if (pin < 32) return GPIOB;
     return NULL;
 }
 
+/**
+ * @brief 将引脚编号映射到引脚掩码
+ * @param pin 引脚编号
+ * @return 引脚掩码，无效返回 0
+ */
 static uint16_t pin_to_mask(uint32_t pin) {
     if (pin < 16) return (uint16_t)(1 << pin);
     else if (pin < 32) return (uint16_t)(1 << (pin - 16));
@@ -23,17 +43,27 @@ static uint16_t pin_to_mask(uint32_t pin) {
 
 #if JM_TONE_ENABLE==1
 
+/**
+ * @brief 音调/PWM 信息结构
+ *
+ * 记录每个音调引脚对应的定时器和通道。
+ */
 typedef struct {
-    uint32_t pin;
-    GPIO_TypeDef *port;
-    uint16_t pinMask;
-    TIM_TypeDef *tim;
-    uint8_t channel;
+    uint32_t pin;            /**< 引脚编号 */
+    GPIO_TypeDef *port;      /**< 所属端口 */
+    uint16_t pinMask;        /**< 引脚掩码 */
+    TIM_TypeDef *tim;        /**< 定时器 */
+    uint8_t channel;         /**< 定时器通道 */
 } tone_info_t;
 
 static tone_info_t g_tone_infos[4] = {0};
 static uint8_t g_tone_info_count = 0;
 
+/**
+ * @brief 查找指定引脚的音调信息
+ * @param pin 引脚编号
+ * @return 音调信息指针，未找到返回 NULL
+ */
 static tone_info_t *tone_find_info(uint32_t pin) {
     for (int i = 0; i < g_tone_info_count; i++) {
         if (g_tone_infos[i].pin == pin) {
@@ -43,6 +73,15 @@ static tone_info_t *tone_find_info(uint32_t pin) {
     return NULL;
 }
 
+/**
+ * @brief 分配一个音调信息结构
+ * @param pin      引脚编号
+ * @param port     端口指针
+ * @param pinMask  引脚掩码
+ * @param tim      定时器指针
+ * @param channel  定时器通道
+ * @return 音调信息指针，失败返回 NULL
+ */
 static tone_info_t *tone_alloc_info(uint32_t pin, GPIO_TypeDef *port, uint16_t pinMask, TIM_TypeDef *tim, uint8_t channel) {
     if (g_tone_info_count >= 4) return NULL;
     tone_info_t *info = &g_tone_infos[g_tone_info_count++];
@@ -56,6 +95,12 @@ static tone_info_t *tone_alloc_info(uint32_t pin, GPIO_TypeDef *port, uint16_t p
 
 
 
+/**
+ * @brief 将引脚映射到定时器和通道
+ * @param pin    引脚编号
+ * @param tim    输出：定时器指针
+ * @param channel 输出：定时器通道
+ */
 static void pin_to_timer(uint32_t pin, TIM_TypeDef **tim, uint8_t *channel) {
     *tim = NULL;
     *channel = 0;
@@ -72,6 +117,12 @@ static void pin_to_timer(uint32_t pin, TIM_TypeDef **tim, uint8_t *channel) {
     }
 }
 
+/* ===================== 音调/PWM/移位/脉冲 ===================== */
+
+/**
+ * @brief 设置引脚为复用推挽输出（用于 PWM/音调）
+ * @param pin 引脚编号
+ */
 static void tone_set_pin_af_pp(uint32_t pin) {
     GPIO_TypeDef *port = pin_to_port(pin);
     uint16_t pinMask = pin_to_mask(pin);
@@ -98,6 +149,10 @@ static void tone_set_pin_af_pp(uint32_t pin) {
     }
 }
 
+/**
+ * @brief 设置引脚为输入模式
+ * @param pin 引脚编号
+ */
 static void tone_set_pin_input(uint32_t pin) {
     GPIO_TypeDef *port = pin_to_port(pin);
     uint16_t pinMask = pin_to_mask(pin);
@@ -121,6 +176,10 @@ static void tone_set_pin_input(uint32_t pin) {
     }
 }
 
+/**
+ * @brief 使能定时器时钟
+ * @param tim 定时器指针
+ */
 static void tone_enable_clock(TIM_TypeDef *tim) {
     if (tim == TIM2) RCC->APB1ENR |= RCC_APB1ENR_TIM2EN;
     else if (tim == TIM3) RCC->APB1ENR |= RCC_APB1ENR_TIM3EN;
@@ -128,6 +187,12 @@ static void tone_enable_clock(TIM_TypeDef *tim) {
 
 static void noTone(uint32_t pin);
 
+/**
+ * @brief 播放音调
+ * @param pin     引脚编号
+ * @param freq    频率（Hz）
+ * @param duration 持续时间（ms），0 表示持续播放
+ */
 static void tone(uint32_t pin, uint32_t freq, uint32_t duration) {
     if (freq == 0) return;
 
@@ -205,6 +270,10 @@ static void tone(uint32_t pin, uint32_t freq, uint32_t duration) {
     }
 }
 
+/**
+ * @brief 停止播放音调
+ * @param pin 引脚编号
+ */
 static void noTone(uint32_t pin) {
     tone_info_t *info = tone_find_info(pin);
     if (info == NULL) return;
@@ -213,6 +282,10 @@ static void noTone(uint32_t pin) {
     tone_set_pin_input(pin);
 }
 
+/**
+ * @brief 设置引脚为普通输出模式
+ * @param pin 引脚编号
+ */
 static void tone_set_pin_output(uint32_t pin) {
     GPIO_TypeDef *port = pin_to_port(pin);
     uint16_t pinMask = pin_to_mask(pin);
@@ -239,6 +312,13 @@ static void tone_set_pin_output(uint32_t pin) {
     }
 }
 
+/**
+ * @brief 读取脉冲信号持续时间（微秒）
+ * @param pin        引脚编号
+ * @param state      等待的电平状态
+ * @param timeout_us 超时时间（微秒）
+ * @return 脉冲持续时间（微秒），超时返回 0
+ */
 static uint32_t tone_pulseIn(uint32_t pin, uint8_t state, uint32_t timeout_us) {
     GPIO_TypeDef *port = pin_to_port(pin);
     uint16_t pinMask = pin_to_mask(pin);
@@ -286,10 +366,24 @@ static uint32_t tone_pulseIn(uint32_t pin, uint8_t state, uint32_t timeout_us) {
     return elapsed / 72;
 }
 
+/**
+ * @brief 读取脉冲信号持续时间（长超时版本）
+ * @param pin        引脚编号
+ * @param state      等待的电平状态
+ * @param timeout_us 超时时间（微秒）
+ * @return 脉冲持续时间（微秒），超时返回 0
+ */
 static uint32_t tone_pulseInLong(uint32_t pin, uint8_t state, uint32_t timeout_us) {
     return tone_pulseIn(pin, state, timeout_us);
 }
 
+/**
+ * @brief 从移位寄存器读取一个字节
+ * @param dataPin   数据引脚编号
+ * @param clockPin  时钟引脚编号
+ * @param bitOrder  位序（0=LSB 优先，1=MSB 优先）
+ * @return 读取的字节
+ */
 static uint8_t tone_shiftIn(uint32_t dataPin, uint32_t clockPin, uint8_t bitOrder) {
     uint8_t value = 0;
     uint8_t i;
@@ -326,6 +420,13 @@ static uint8_t tone_shiftIn(uint32_t dataPin, uint32_t clockPin, uint8_t bitOrde
     return value;
 }
 
+/**
+ * @brief 向移位寄存器写入一个字节
+ * @param dataPin   数据引脚编号
+ * @param clockPin  时钟引脚编号
+ * @param bitOrder  位序（0=LSB 优先，1=MSB 优先）
+ * @param val       待写入的字节
+ */
 static void tone_shiftOut(uint32_t dataPin, uint32_t clockPin, uint8_t bitOrder, uint8_t val) {
     GPIO_TypeDef *clkPort = pin_to_port(clockPin);
     uint16_t clkMask = pin_to_mask(clockPin);
@@ -366,8 +467,10 @@ static void tone_shiftOut(uint32_t dataPin, uint32_t clockPin, uint8_t bitOrder,
 
 #if JM_AT24CXX_ENABLE==1
 
-#define EEPROM_I2C_ADDRESS 0x50
-#define EEPROM_I2C_TIMEOUT 10000
+/* ===================== AT24CXX EEPROM (I2C) ===================== */
+
+#define EEPROM_I2C_ADDRESS 0x50  /**< AT24CXX I2C 设备地址 */
+#define EEPROM_I2C_TIMEOUT 10000 /**< I2C 超时计数 */
 
 static I2C_TypeDef *eeprom_i2c = I2C1;
 static bool eeprom_i2c_inited = false;
@@ -405,6 +508,12 @@ static uint8_t i2c_read_byte(bool ack) {
     return eeprom_i2c->DR;
 }
 
+/**
+ * @brief 初始化 EEPROM 的 I2C 接口
+ * @param sda SDA 引脚编号
+ * @param scl SCL 引脚编号
+ * @return true 成功
+ */
 static bool eeprom_i2c_init(uint8_t sda, uint8_t scl) {
     GPIO_TypeDef *sda_port = pin_to_port(sda);
     GPIO_TypeDef *scl_port = pin_to_port(scl);
@@ -465,6 +574,12 @@ static bool eeprom_i2c_init(uint8_t sda, uint8_t scl) {
     return true;
 }
 
+/**
+ * @brief 向 EEPROM 指定地址写入一个字节
+ * @param addr 地址
+ * @param data 数据
+ * @return true 成功
+ */
 static bool eeprom_write_byte(uint16_t addr, uint8_t data) {
     if (!i2c_start()) return false;
     if (!i2c_send_addr(EEPROM_I2C_ADDRESS, false)) return false;
@@ -476,6 +591,11 @@ static bool eeprom_write_byte(uint16_t addr, uint8_t data) {
     return true;
 }
 
+/**
+ * @brief 从 EEPROM 指定地址读取一个字节
+ * @param addr 地址
+ * @return 读取到的数据
+ */
 static uint8_t eeprom_read_byte(uint16_t addr) {
     if (!i2c_start()) return 0;
     if (!i2c_send_addr(EEPROM_I2C_ADDRESS, false)) return 0;
@@ -490,6 +610,13 @@ static uint8_t eeprom_read_byte(uint16_t addr) {
     return data;
 }
 
+/**
+ * @brief 从 EEPROM 指定地址读取多个字节
+ * @param addr 起始地址
+ * @param buf  输出缓冲区
+ * @param len  读取长度
+ * @return true 成功
+ */
 static bool eeprom_read_bytes(uint16_t addr, uint8_t *buf, uint8_t len) {
     if (!i2c_start()) return false;
     if (!i2c_send_addr(EEPROM_I2C_ADDRESS, false)) return false;
@@ -507,6 +634,9 @@ static bool eeprom_read_bytes(uint16_t addr, uint8_t *buf, uint8_t len) {
     return true;
 }
 
+/**
+ * @brief 扫描 I2C 总线上可能存在的 EEPROM 设备
+ */
 static void eeprom_scan_devices(void) {
     for (uint8_t addr = 8; addr < 120; addr++) {
         if (!i2c_start()) continue;
@@ -515,6 +645,11 @@ static void eeprom_scan_devices(void) {
     }
 }
 
+/**
+ * @brief AT24CXX EEPROM 控制命令处理
+ * @param ps emap 参数（op, addr, data 等）
+ * @return 结果 emap，调用者需释放
+ */
 jm_emap_t* jm_stm32_at24cxx_call(jm_emap_t *ps) {
     jm_emap_t *rst = jm_emap_create(PREFIX_TYPE_STRINGG);
     jm_emap_putByte(rst, (void*)"code", 0, false);
@@ -588,6 +723,8 @@ jm_emap_t* jm_stm32_at24cxx_call(jm_emap_t *ps) {
 #endif // JM_AT24CXX_ENABLE==1
 
 #if JM_I2C_WRAPPER_ENABLE==1
+
+/* ===================== I2C Wrapper (Wire-like API) ===================== */
 
 #define I2C_MAX_WIRES 4
 
@@ -712,6 +849,12 @@ static uint8_t i2cw_read(I2C_TypeDef *i2c, bool ack) {
     return i2c->DR;
 }
 
+/**
+ * @brief 初始化 I2C 总线
+ * @param wireId  总线 ID（编码为 (scl<<8|sda)）
+ * @param address 设备地址
+ * @return 0 成功，-1 失败
+ */
 int8_t jm_i2c_begin(uint16_t wireId, uint8_t address) {
     i2c_wire_t *wire = i2c_find_wire(wireId);
     if (!wire) wire = i2c_alloc_wire(wireId);
@@ -735,6 +878,12 @@ int8_t jm_i2c_begin(uint16_t wireId, uint8_t address) {
     return 0;
 }
 
+/**
+ * @brief 设置 I2C 时钟频率
+ * @param wireId 总线 ID
+ * @param clock  时钟频率（Hz）
+ * @return 0 成功，-1 失败
+ */
 int8_t jm_i2c_set_clock(uint16_t wireId, uint32_t clock) {
     i2c_wire_t *wire = i2c_find_wire(wireId);
     if (!wire || !wire->initialized) return -1;
@@ -745,6 +894,12 @@ int8_t jm_i2c_set_clock(uint16_t wireId, uint32_t clock) {
     return 0;
 }
 
+/**
+ * @brief 开始 I2C 发送事务
+ * @param wireId  总线 ID
+ * @param address 设备地址
+ * @return 0 成功，-1 失败
+ */
 int8_t jm_i2c_begin_transmission(uint16_t wireId, uint8_t address) {
     i2c_wire_t *wire = i2c_find_wire(wireId);
     if (!wire || !wire->initialized) return -1;
@@ -754,6 +909,12 @@ int8_t jm_i2c_begin_transmission(uint16_t wireId, uint8_t address) {
     return 0;
 }
 
+/**
+ * @brief 结束 I2C 发送事务
+ * @param wireId    总线 ID
+ * @param releaseBus 是否释放总线
+ * @return 0 成功，-1 失败
+ */
 int8_t jm_i2c_end_transmission(uint16_t wireId, bool releaseBus) {
     i2c_wire_t *wire = i2c_find_wire(wireId);
     if (!wire || !wire->initialized) return -1;
@@ -763,6 +924,14 @@ int8_t jm_i2c_end_transmission(uint16_t wireId, bool releaseBus) {
     return 0;
 }
 
+/**
+ * @brief 请求从 I2C 设备读取数据
+ * @param wireId  总线 ID
+ * @param address 设备地址
+ * @param size    请求读取的字节数
+ * @param stop    是否发送停止信号
+ * @return 读取的字节数，-1 表示失败
+ */
 int8_t jm_i2c_request_from(uint16_t wireId, uint8_t address, uint16_t size, bool stop) {
     i2c_wire_t *wire = i2c_find_wire(wireId);
     if (!wire || !wire->initialized) return -1;
@@ -783,6 +952,12 @@ int8_t jm_i2c_request_from(uint16_t wireId, uint8_t address, uint16_t size, bool
     return size;
 }
 
+/**
+ * @brief 向 I2C 总线写入一个字节
+ * @param wireId 总线 ID
+ * @param data   数据
+ * @return 0 成功，-1 失败
+ */
 int8_t jm_i2c_write_byte(uint16_t wireId, uint8_t data) {
     i2c_wire_t *wire = i2c_find_wire(wireId);
     if (!wire || !wire->initialized) return -1;
@@ -791,6 +966,13 @@ int8_t jm_i2c_write_byte(uint16_t wireId, uint8_t data) {
     return 0;
 }
 
+/**
+ * @brief 向 I2C 总线写入缓冲区数据
+ * @param wireId 总线 ID
+ * @param data   数据指针
+ * @param size   数据长度
+ * @return 写入的字节数，-1 表示失败
+ */
 int8_t jm_i2c_write_buffer(uint16_t wireId, const uint8_t *data, uint16_t size) {
     i2c_wire_t *wire = i2c_find_wire(wireId);
     if (!wire || !wire->initialized) return -1;
@@ -801,6 +983,11 @@ int8_t jm_i2c_write_buffer(uint16_t wireId, const uint8_t *data, uint16_t size) 
     return size;
 }
 
+/**
+ * @brief 查询 I2C 总线上可读的字节数
+ * @param wireId 总线 ID
+ * @return 可读字节数，-1 表示失败
+ */
 int8_t jm_i2c_available(uint16_t wireId) {
     i2c_wire_t *wire = i2c_find_wire(wireId);
     if (!wire || !wire->initialized) return -1;
@@ -811,6 +998,13 @@ int8_t jm_i2c_available(uint16_t wireId) {
     return 0;
 }
 
+/**
+ * @brief 从 I2C 总线读取数据
+ * @param wireId  总线 ID
+ * @param buffer  输出缓冲区
+ * @param size    读取字节数
+ * @return 读取的字节数，-1 表示失败
+ */
 int8_t jm_i2c_read(uint16_t wireId, uint8_t *buffer, uint16_t size) {
     i2c_wire_t *wire = i2c_find_wire(wireId);
     if (!wire || !wire->initialized) return -1;
@@ -829,6 +1023,15 @@ int8_t jm_i2c_read(uint16_t wireId, uint8_t *buffer, uint16_t size) {
 
 #endif // JM_I2C_WRAPPER_ENABLE==1
 
+/**
+ * @brief 默认控制命令处理
+ *
+ * 处理音调(tone)、脉冲检测(pulseIn)、移位寄存器(shiftIn/shiftOut)、
+ * 中断控制、I2C 操作、EEPROM 操作等控制命令。
+ *
+ * @param ps emap 参数
+ * @return 结果 emap，调用者需释放
+ */
 jm_emap_t *jm_stm32_ctrl_def(jm_emap_t *ps) {
     jm_emap_t *h = jm_emap_create(0);
     if (!h) return NULL;

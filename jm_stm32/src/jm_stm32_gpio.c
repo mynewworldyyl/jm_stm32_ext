@@ -1,3 +1,11 @@
+/**
+ * @file jm_stm32_gpio.c
+ * @brief GPIO/ADC/PWM/I2C 控制实现
+ *
+ * 实现通过串口控制命令对 GPIO 进行读写、PWM 输出、ADC 读取、
+ * I2C 通信等操作。使用寄存器直驱方式，无需 HAL 库。
+ */
+
 #include "jm_stm32.h"
 #include "jm_stm32_com.h"
 
@@ -11,13 +19,19 @@
 
 #define GPIO_MAX_PIN 32
 
+/** @brief GPIO 状态跟踪结构 */
 typedef struct {
-    uint32_t output_enabled;
-    uint32_t adc_initialized;
+    uint32_t output_enabled;   /**< 输出已初始化的引脚掩码 */
+    uint32_t adc_initialized;    /**< ADC 初始化标志 */
 } gpio_state_t;
 
 static gpio_state_t g_gpio_state = {0};
 
+/**
+ * @brief 将引脚编号映射到 GPIO 端口
+ * @param gpioNo 引脚编号 (0-15=PA0-PA15, 16-31=PB0-PB15)
+ * @return 端口指针，无效返回 NULL
+ */
 static GPIO_TypeDef *gpio_no_to_port(uint32_t gpioNo) {
     if (gpioNo < 16) {
         return GPIOA;
@@ -27,6 +41,11 @@ static GPIO_TypeDef *gpio_no_to_port(uint32_t gpioNo) {
     return NULL;
 }
 
+/**
+ * @brief 将引脚编号映射到引脚掩码
+ * @param gpioNo 引脚编号
+ * @return 引脚掩码，无效返回 0
+ */
 static uint16_t gpio_no_to_pin(uint32_t gpioNo) {
     if (gpioNo < 16) {
         return (uint16_t)(1 << gpioNo);
@@ -36,6 +55,10 @@ static uint16_t gpio_no_to_pin(uint32_t gpioNo) {
     return 0;
 }
 
+/**
+ * @brief 使能 GPIO 端口时钟
+ * @param port 端口指针
+ */
 static void gpio_enable_clock(GPIO_TypeDef *port) {
     if (port == GPIOA) {
         RCC->APB2ENR |= RCC_APB2ENR_IOPAEN;
@@ -44,6 +67,10 @@ static void gpio_enable_clock(GPIO_TypeDef *port) {
     }
 }
 
+/**
+ * @brief 设置 GPIO 为输出模式
+ * @param gpioNo 引脚编号
+ */
 static void gpio_set_output(uint32_t gpioNo) {
     GPIO_TypeDef *port = gpio_no_to_port(gpioNo);
     uint16_t pin = gpio_no_to_pin(gpioNo);
@@ -79,6 +106,10 @@ static void gpio_set_output(uint32_t gpioNo) {
     g_gpio_state.output_enabled |= pin;
 }
 
+/**
+ * @brief 设置 GPIO 为输入模式
+ * @param gpioNo 引脚编号
+ */
 static void gpio_set_input(uint32_t gpioNo) {
     GPIO_TypeDef *port = gpio_no_to_port(gpioNo);
     uint16_t pin = gpio_no_to_pin(gpioNo);
@@ -108,6 +139,9 @@ static void gpio_set_input(uint32_t gpioNo) {
     }
 }
 
+/**
+ * @brief 一次性初始化 ADC1
+ */
 static void adc_init_once(void) {
     if (g_gpio_state.adc_initialized) return;
 
@@ -135,6 +169,11 @@ static void adc_init_once(void) {
     g_gpio_state.adc_initialized = 1;
 }
 
+/**
+ * @brief 读取 ADC 单个通道的值
+ * @param channel ADC 通道（0-7）
+ * @return 12 位 ADC 值（0-4095）
+ */
 static uint16_t adc_read_channel(uint8_t channel) {
     if (channel > 7) return 0;
 
@@ -151,6 +190,10 @@ static uint16_t adc_read_channel(uint8_t channel) {
     return (uint16_t)(ADC1->DR & 0xFFF);
 }
 
+/**
+ * @brief 初始化 PWM 输出引脚（设置为复用推挽输出）
+ * @param gpioNo 引脚编号
+ */
 static void pwm_init_pin(uint32_t gpioNo) {
     GPIO_TypeDef *port = gpio_no_to_port(gpioNo);
     if (!port) return;
@@ -178,6 +221,11 @@ static void pwm_init_pin(uint32_t gpioNo) {
     }
 }
 
+/**
+ * @brief 设置 PWM 占空比
+ * @param gpioNo 引脚编号
+ * @param value  占空比值（0-255）
+ */
 static void pwm_set_duty(uint32_t gpioNo, uint32_t value) {
     if ((gpioNo >= 4 && gpioNo <= 5) || gpioNo >= 8) return;
 
@@ -246,6 +294,15 @@ static void pwm_set_duty(uint32_t gpioNo, uint32_t value) {
     }
 }
 
+/**
+ * @brief GPIO 控制处理函数
+ *
+ * 处理从 ESP8266 下发的 GPIO 操作命令，支持输入读取、输出设置、
+ * PWM 输出、ADC 读取等操作。
+ *
+ * @param ps 包含命令参数的 emap (op, gpioNo, v 等)
+ * @return 包含响应数据的 emap，调用者需释放
+ */
 jm_emap_t *ctrl_remote_ctrlGpio(jm_emap_t *ps) {
     jm_emap_t *h = jm_emap_create(0);
     if (!h) return NULL;
@@ -369,6 +426,10 @@ jm_emap_t *ctrl_remote_ctrlGpio(jm_emap_t *ps) {
     return h;
 }
 
+/**
+ * @brief GPIO 控制模块初始化
+ * 注册 GPIO 控制命令处理函数（defId=53）。
+ */
 void jm_gpio_init(void) {
     jm_ctrl_registFun(ctrl_remote_ctrlGpio, 53);
 }

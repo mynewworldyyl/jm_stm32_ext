@@ -1,3 +1,13 @@
+/**
+ * @file jm_stm32.c
+ * @brief jm_stm32 协议栈核心实现
+ *
+ * 实现串口协议收发、事件分发、控制命令处理、MQTT 透传等功能。
+ * 默认使用寄存器直驱（CMSIS）模式，HAL 模式可选。
+ *
+ * @copyright MIT
+ */
+
 #include "jm_stm32.h"
 #include "jm_stm32_buf.h"
 
@@ -9,6 +19,7 @@
 #include <stm32f1xx.h>
 #endif
 
+/** @brief UART 接收环形缓冲区大小 */
 #define JM_RX_RING_SIZE 256
 
 #if JM_STM32_EVENT_ENABLE
@@ -16,52 +27,74 @@ static void jm_stm32_runEvent(void);
 #endif
 static int jm_send_serial_packet(uint16_t subtype, uint16_t msg_id, const uint8_t *payload, uint16_t payload_len);
 
+/**
+ * @brief UART 接收环形缓冲区
+ *
+ * 用于在中断上下文快速存储从 ESP8266 接收的字节，
+ * 主循环从中读取并喂给协议解析器。
+ */
 typedef struct {
-    uint8_t buf[JM_RX_RING_SIZE];
-    volatile uint16_t head;
-    volatile uint16_t tail;
+    uint8_t buf[JM_RX_RING_SIZE];    /**< 缓冲区 */
+    volatile uint16_t head;          /**< 写入指针 */
+    volatile uint16_t tail;          /**< 读取指针 */
 } jm_rx_ring_t;
 
+/**
+ * @brief 串口接收状态机
+ *
+ * 逐字节解析串口数据包， reassemble 完整后触发处理。
+ */
 typedef struct {
-    uint32_t last_recv_time;
-    jm_buf_t *assembling_buf;
-    uint16_t data_size;
-    uint16_t recv_size;
-    uint8_t ds;
-    uint8_t req_id;
-    uint8_t ack_req_id;
-    uint16_t wpos;
-    uint8_t cheader;//当前包的头部值
+    uint32_t last_recv_time;    /**< 上次接收时间（用于超时清包） */
+    jm_buf_t *assembling_buf;   /**< 正在组装的数据包缓冲区 */
+    uint16_t data_size;         /**< 当前包的总数据大小 */
+    uint16_t recv_size;         /**< 已接收的字节数 */
+    uint8_t ds;                 /**< 状态机当前步骤 */
+    uint8_t req_id;             /**< 请求 ID（从包头解析） */
+    uint8_t ack_req_id;         /**< ACK 请求 ID */
+    uint16_t wpos;              /**< 写入位置 */
+    uint8_t cheader;            /**< 当前包头值 */
 } jm_rx_state_t;
 
+/**
+ * @brief jm_stm32 全局上下文
+ */
 typedef struct {
-    const jm_config_t *config;
-    jm_rx_state_t rx;
-    bool initialized;
+    const jm_config_t *config;  /**< 用户配置 */
+    jm_rx_state_t rx;           /**< 接收状态机 */
+    bool initialized;           /**< 初始化标志 */
 } jm_ctx_t;
 
 static jm_ctx_t g_ctx;
 static jm_rx_ring_t g_rx_ring;
 
+/** @brief 全局请求 ID 计数器（0 和 1 保留） */
 static uint8_t REQ_ID = 1;
 
 
-//引脚中断
+/* ===================== 引脚中断模块 ===================== */
+
 #if JM_STM32_INTERRUPT_ENABLE
 
+/** @brief 触发类型：上升沿 */
 #define JM_STM32_TRIGGER_RISING  1
+/** @brief 触发类型：下降沿 */
 #define JM_STM32_TRIGGER_FALLING 2
+/** @brief 触发类型：边沿变化 */
 #define JM_STM32_TRIGGER_CHANGE  3
 
+/** @brief 最大支持的引脚中断数量 */
 #define JM_STM32_MAX_PIN_INTERRUPTS 16
 
+/** @brief 按键去抖延时（毫秒） */
 #define JM_STM32_DEBOUNCE_MS    70
 
+/** @brief 引脚中断描述结构 */
 typedef struct {
-    uint16_t pin;
-    uint8_t triggerType;
-    bool active;
-    uint32_t last_irq_time;
+    uint16_t pin;              /**< 引脚编号 */
+    uint8_t triggerType;       /**< 触发类型 */
+    bool active;               /**< 是否激活 */
+    uint32_t last_irq_time;    /**< 上次中断时间（用于去抖） */
 } jm_pin_interrupt_t;
 
 static jm_pin_interrupt_t g_pinInterrupts[JM_STM32_MAX_PIN_INTERRUPTS] = {0};
@@ -162,6 +195,11 @@ static bool jm_stm32_unregisterPinInterrupt(uint16_t gpioNo) {
 }
 
 //有引脚中断发送，将事件上行到网卡分发出去
+/**
+ * @brief 上报引脚中断事件到 ESP8266
+ * @param pin 引脚编号
+ * @return true 成功
+ */
 int jm_stm32_pinInterrupt(const uint16_t pin) {
     jm_buf_t *hbuf = jm_buf_create(5);
 	if(hbuf == NULL) {
@@ -282,6 +320,13 @@ void EXTI15_10_IRQHandler(void) {
 
 #endif //JM_STM32_INTERRUPT_ENABLE
 
+/* ===================== 接收环形缓冲区 ===================== */
+
+/**
+ * @brief 将一个字节推入接收环形缓冲区
+ * @param byte 待推入的字节
+ * @return true 成功，false 缓冲区已满
+ */
 static inline bool jm_rx_ring_push(uint8_t byte)
 {
     uint16_t next = (g_rx_ring.head + 1) % JM_RX_RING_SIZE;
@@ -291,6 +336,11 @@ static inline bool jm_rx_ring_push(uint8_t byte)
     return true;
 }
 
+/**
+ * @brief 从接收环形缓冲区弹出一个字节
+ * @param byte 输出字节
+ * @return true 成功，false 缓冲区为空
+ */
 static inline bool jm_rx_ring_pop(uint8_t *byte)
 {
     if (g_rx_ring.head == g_rx_ring.tail) return false;
@@ -301,11 +351,21 @@ static inline bool jm_rx_ring_pop(uint8_t *byte)
 
 
 
+/**
+ * @brief 释放动态分配的字符串指针
+ * @param s 字符串指针
+ */
 static void jm_free_string(char *s)
 {
     if (s) free(s);
 }
 
+/**
+ * @brief 分发事件到用户回调
+ * @param event_type 事件类型
+ * @param sub_type   子类型
+ * @param data       事件数据
+ */
 static void jm_dispatch_event(uint8_t event_type, uint16_t sub_type, void *data)
 {
     if (g_ctx.config && g_ctx.config->event_cb) {
@@ -314,6 +374,10 @@ static void jm_dispatch_event(uint8_t event_type, uint16_t sub_type, void *data)
     }
 }
 
+/**
+ * @brief 根据 STM32 唯一 ID 哈希生成一个 32 位设备 ID
+ * @return 设备 ID
+ */
 static uint32_t get_unique_id(void) {
     uint32_t a = *(volatile uint32_t *)0x1FFFF7E8;
     uint32_t b = *(volatile uint32_t *)0x1FFFF7EC;
@@ -326,13 +390,19 @@ static uint32_t get_unique_id(void) {
     return h;
 }
 
-/* ===================== Minimal map for STM32 control commands ===================== */
+/* ===================== emap（键值对）与控制命令 ===================== */
 
+/** @brief 最大支持的控制命令函数数量 */
 #define MAX_CTRL_FUNS 8
 
 static jm_ctrl_item_t g_ctrl_reg[MAX_CTRL_FUNS];
 static uint8_t g_ctrl_reg_count = 0;
 
+/**
+ * @brief 创建 emap 容器
+ * @param type 容器类型
+ * @return emap 指针，失败返回 NULL
+ */
 jm_emap_t *jm_emap_create(uint8_t type) {
     jm_emap_t *map = (jm_emap_t *)malloc(sizeof(jm_emap_t));
     if (map) {
@@ -342,6 +412,14 @@ jm_emap_t *jm_emap_create(uint8_t type) {
     return map;
 }
 
+/**
+ * @brief 释放 emap 容器及所有节点
+ * @param map emap 指针
+ */
+/**
+ * @brief 释放 emap 容器及所有节点
+ * @param map emap 指针
+ */
 void jm_emap_release(jm_emap_t *map) {
     if (!map) return;
     jm_emap_node_t *node = map->head;
@@ -362,6 +440,14 @@ void jm_emap_release(jm_emap_t *map) {
     //JM_LOG_D("10");
 }
 
+/**
+ * @brief 添加整数键值对到 emap
+ * @param map     emap 容器
+ * @param key     键名
+ * @param val     整数值
+ * @param copyKey 是否复制 key 字符串
+ * @return true 成功
+ */
 bool jm_emap_putInt(jm_emap_t *map, const char *key, int32_t val, bool copyKey) {
     if (!map || !key) return false;
     jm_emap_node_t *node = map->head;
@@ -385,6 +471,15 @@ bool jm_emap_putInt(jm_emap_t *map, const char *key, int32_t val, bool copyKey) 
     return true;
 }
 
+/**
+ * @brief 添加字符串键值对到 emap
+ * @param map        emap 容器
+ * @param key        键名
+ * @param val        字符串值
+ * @param needFreeMem 是否在释放 emap 时释放 val 内存
+ * @param copyKey    是否复制 key 字符串
+ * @return true 成功
+ */
 bool jm_emap_putStr(jm_emap_t *map, const char *key, const char *val, bool needFreeMem, bool copyKey) {
     if (!map || !key) return false;
     jm_emap_node_t *node = map->head;
@@ -411,14 +506,36 @@ bool jm_emap_putStr(jm_emap_t *map, const char *key, const char *val, bool needF
     return true;
 }
 
+/**
+ * @brief 添加字节（int8）键值对到 emap
+ * @param map     emap 容器
+ * @param key     键名
+ * @param val     字节值
+ * @param copyKey 是否复制 key 字符串
+ * @return true 成功
+ */
 bool jm_emap_putByte(jm_emap_t *map, const char *key, int8_t val, bool copyKey) {
     return jm_emap_putInt(map, key, (int32_t)val, copyKey);
 }
 
+/**
+ * @brief 获取字节值
+ * @param map  emap 容器
+ * @param key  键名
+ * @param def  默认值
+ * @return 字节值
+ */
 int8_t jm_emap_getByte(jm_emap_t *map, const char *key, int8_t def) {
     return (int8_t)jm_emap_getInt(map, key, (int32_t)def);
 }
 
+/**
+ * @brief 获取整数值
+ * @param map  emap 容器
+ * @param key  键名
+ * @param def  默认值
+ * @return 整数值
+ */
 int32_t jm_emap_getInt(jm_emap_t *map, const char *key, int32_t def) {
     jm_emap_node_t *node = map->head;
     while (node) {
@@ -430,6 +547,12 @@ int32_t jm_emap_getInt(jm_emap_t *map, const char *key, int32_t def) {
     return def;
 }
 
+/**
+ * @brief 获取字符串值
+ * @param map  emap 容器
+ * @param key  键名
+ * @return 字符串指针，键不存在返回 NULL
+ */
 char *jm_emap_getStr(jm_emap_t *map, const char *key) {
     jm_emap_node_t *node = map->head;
     while (node) {
@@ -441,6 +564,12 @@ char *jm_emap_getStr(jm_emap_t *map, const char *key) {
     return NULL;
 }
 
+/**
+ * @brief 检查键是否存在
+ * @param map  emap 容器
+ * @param key  键名
+ * @return true 存在
+ */
 bool jm_emap_exist(jm_emap_t *map, const char *key) {
     jm_emap_node_t *node = map->head;
     while (node) {
@@ -452,6 +581,12 @@ bool jm_emap_exist(jm_emap_t *map, const char *key) {
     return false;
 }
 
+/**
+ * @brief 将 emap 序列化到缓冲区
+ * @param map emap 容器
+ * @param buf 目标缓冲区
+ * @return true 成功
+ */
 bool jm_emap_encode(const jm_emap_t *map, jm_buf_t *buf) {
     if (!map || !buf) return false;
     if (!jm_buf_put_s8(buf, PREFIX_TYPE_MAP)) return false;
@@ -476,6 +611,12 @@ bool jm_emap_encode(const jm_emap_t *map, jm_buf_t *buf) {
     return true;
 }
 
+/**
+ * @brief 从字节数据反序列化为 emap
+ * @param data 序列化数据
+ * @param len  数据长度
+ * @return emap 指针（调用者需释放），失败返回 NULL
+ */
 jm_emap_t *jm_emap_decode(const uint8_t *data, uint16_t len) {
     if (!data || len < 4) return NULL;
 
@@ -579,6 +720,18 @@ jm_emap_t *jm_emap_decode(const uint8_t *data, uint16_t len) {
     return map;
 }
 
+/**
+ * @brief 注册控制命令处理函数
+ * @param fn    处理函数
+ * @param defId 命令 ID
+ * @return true 成功，false 失败或已达上限
+ */
+/**
+ * @brief 注册控制命令处理函数
+ * @param fn    处理函数
+ * @param defId 命令 ID
+ * @return true 成功，false 失败或已达上限
+ */
 bool jm_ctrl_registFun(jm_ctrl_fn_t fn, int32_t defId) {
     if (!fn || g_ctrl_reg_count >= MAX_CTRL_FUNS) return false;
     for (int i = 0; i < g_ctrl_reg_count; i++) {
@@ -590,6 +743,10 @@ bool jm_ctrl_registFun(jm_ctrl_fn_t fn, int32_t defId) {
     return true;
 }
 
+/**
+ * @brief 返回"命令未找到"错误响应
+ * @return 包含 code=2 和 msg="method not found" 的 emap
+ */
 static jm_emap_t *jm_ctrl_not_found(void) {
     jm_emap_t *rst = jm_emap_create(0);
     if (rst) {
@@ -599,6 +756,11 @@ static jm_emap_t *jm_ctrl_not_found(void) {
     return rst;
 }
 
+/**
+ * @brief 调用控制命令处理函数
+ * @param ps 包含 funName/_fn 字段的 emap 参数
+ * @return 处理结果 emap，调用者需释放
+ */
 jm_emap_t *jm_ctrl_invokeFunc(jm_emap_t *ps) {
     if (!ps) return NULL;
 
@@ -624,6 +786,14 @@ jm_emap_t *jm_ctrl_invokeFunc(jm_emap_t *ps) {
 
 /* ===================== End map ===================== */
 
+/**
+ * @brief 解析串口控制命令数据包（Type=3）
+ *
+ * 解析从 ESP8266 收到的串口控制命令，根据子类型派发相应事件。
+ *
+ * @param payload     数据负载（跳过包头后的内容）
+ * @param payload_len 负载长度
+ */
 static void jm_parse_serial_packet(const uint8_t *payload, uint16_t payload_len)
 {
     if (payload_len < 8) {
@@ -894,6 +1064,10 @@ static void jm_parse_serial_packet(const uint8_t *payload, uint16_t payload_len)
     //JM_LOG_D("SPE");
 }
 
+/**
+ * @brief 获取系统运行时间（毫秒）
+ * @return 系统毫秒时间，未初始化返回 0
+ */
 uint32_t jm_stm32_get_time(void) {
     if (g_ctx.initialized && g_ctx.config && g_ctx.config->get_sys_time_ms) {
         return g_ctx.config->get_sys_time_ms();
@@ -901,6 +1075,15 @@ uint32_t jm_stm32_get_time(void) {
     return 0;
 }
 
+/**
+ * @brief 初始化 jm_stm32 库
+ *
+ * 初始化全局上下文、接收缓冲区，并调用 @ref jm_comp_init 初始化子组件。
+ * 必须在调用其他 API 前完成一次。
+ *
+ * @param config 用户配置结构体
+ * @return @ref JM_SUCCESS 成功，@ref JM_ERR_NOT_READY 配置无效
+ */
 int jm_stm32_init(const jm_config_t *config)
 {
     if (!config || !config->get_sys_time_ms || !config->uart_send) {
@@ -922,6 +1105,13 @@ int jm_stm32_init(const jm_config_t *config)
     return JM_SUCCESS;
 }
 
+/**
+ * @brief jm_stm32 主轮询函数
+ *
+ * 从接收环形缓冲区读取所有已接收的字节并喂给协议解析器，
+ * 调用 @ref jm_comp_loop 处理子组件，处理异步事件队列。
+ * 应在主循环中周期性调用。
+ */
 void jm_stm32_loop(void)
 {
     if (!g_ctx.initialized) return;
@@ -939,11 +1129,30 @@ void jm_stm32_loop(void)
 
 }
 
+/* ===================== UART 接收处理 ===================== */
+
+/**
+ * @brief 将接收到的 UART 字节推入接收环形缓冲区
+ *
+ * 寄存器直驱模式下，UART 中断服务函数调用本函数存储字节。
+ * 主循环通过 @ref jm_stm32_loop 读取并处理这些字节。
+ *
+ * @param byte 收到的字节
+ * @return true 推入成功，false 缓冲区已满
+ */
 bool jm_stm32_uart_push_byte(uint8_t byte)
 {
     return jm_rx_ring_push(byte);
 }
 
+/**
+ * @brief 直接处理一个 UART 字节（不经过环形缓冲区）
+ *
+ * 逐字节解析串口协议， reassemble 完成后自动分发事件或派发给 @ref jm_parse_serial_packet。
+ * 包括包头同步、长度解析、校验、超时清包等逻辑。
+ *
+ * @param byte 收到的字节
+ */
 void jm_stm32_uart_rx_byte(uint8_t byte)
 {
     if (!g_ctx.initialized) return;
@@ -1105,7 +1314,15 @@ void jm_stm32_uart_rx_byte(uint8_t byte)
     }
 }
 
- uint8_t jm_stm32_next_req_id(void) {
+/**
+ * @brief 获取下一个请求 ID（自动递增）
+ *
+ * 请求 ID 0 和 1 保留，0 表示 ACK 包，1 保留。
+ * 当计数器溢出（达到 255 后溢出为 0）时，会重置为 2。
+ *
+ * @return 下一个请求 ID
+ */
+uint8_t jm_stm32_next_req_id(void) {
     uint8_t reqId =  ++REQ_ID;
 	if(reqId==0) {
 		//确保reqId不等于0或1
@@ -1114,6 +1331,18 @@ void jm_stm32_uart_rx_byte(uint8_t byte)
     return reqId;
  }
 
+/* ===================== 发送数据包 API ===================== */
+
+/**
+ * @brief 创建发送缓冲区（包含串口包头）
+ *
+ * 构建数据包：[0, 0, 0x55, type] 后跟用户数据。
+ * 两个 0 长度字节表示不分片（本地包长度不超过 JM_MAX_SERIAL_BLOCK_SIZE）。
+ *
+ * @param type 包类型（@ref JM_SERIALNET_TYPE_*）
+ * @param size 用户数据大小
+ * @return 缓冲区指针，失败返回 NULL
+ */
 jm_buf_t* jm_other_buf(uint8_t type, uint16_t size) {
 
  	jm_buf_t *hbuf = jm_buf_create(size+5);
@@ -1129,6 +1358,13 @@ jm_buf_t* jm_other_buf(uint8_t type, uint16_t size) {
  	return hbuf;
 }
 
+/**
+ * @brief 发送非串口控制类型的其它数据包
+ * @param type        包类型
+ * @param payload     数据负载
+ * @param payload_len 负载长度
+ * @return @ref JM_SUCCESS 成功
+ */
 static int jm_send_other_packet(uint8_t type, const uint8_t *payload, uint16_t payload_len)
 {
     if (!g_ctx.initialized || !g_ctx.config->uart_send) {
@@ -1167,6 +1403,13 @@ static int jm_send_other_packet(uint8_t type, const uint8_t *payload, uint16_t p
     return JM_SUCCESS;
 }
 
+/**
+ * @brief 创建串口控制命令缓冲区
+ * @param subType 子类型
+ * @param msgId   消息 ID
+ * @param size    额外数据大小
+ * @return 缓冲区指针
+ */
 static jm_buf_t* jm_serial_buf(uint16_t subType, uint16_t msgId, uint16_t size) {
 
     jm_buf_t *hbuf = jm_other_buf(JM_SERIALNET_TYPE_SERIAL, size+5);
@@ -1181,6 +1424,18 @@ static jm_buf_t* jm_serial_buf(uint16_t subType, uint16_t msgId, uint16_t size) 
  	return hbuf;
 }
 
+/**
+ * @brief 发送串口控制命令数据包（Type=3）
+ *
+ * 构造完整串口数据包：[包头][长度][reqId][0,0][0x55][3][subtype][reqId][payload]
+ * 并通过 uart_send 发送到 ESP8266。
+ *
+ * @param subtype     子类型（@ref JM_TASK_APP_PROXY_*）
+ * @param msg_id      消息 ID
+ * @param payload     数据负载
+ * @param payload_len 负载长度
+ * @return @ref JM_SUCCESS 成功，@ref JM_ERR_NOT_READY 未初始化
+ */
 static int jm_send_serial_packet(uint16_t subtype, uint16_t msg_id, const uint8_t *payload, uint16_t payload_len)
 {
     if (!g_ctx.initialized || !g_ctx.config->uart_send) {
@@ -1223,6 +1478,12 @@ static int jm_send_serial_packet(uint16_t subtype, uint16_t msg_id, const uint8_
     return JM_SUCCESS;
 }
 
+/**
+ * @brief 发送控制命令响应结果
+ * @param req_id 对应请求的 ID
+ * @param rst    响应 emap 容器
+ * @return @ref JM_SUCCESS 成功
+ */
 int jm_stm32_send_ctrl_rst(uint16_t req_id, jm_emap_t *rst) {
     if (!rst) return JM_ERR_INVALID_PACKET;
     jm_buf_t *buf = jm_buf_create(128);
@@ -1241,6 +1502,14 @@ int jm_stm32_send_ctrl_rst(uint16_t req_id, jm_emap_t *rst) {
     return ret;
 }
 
+/**
+ * @brief 发送设备 UID 到 ESP8266
+ *
+ * 从 STM32 唯一 ID 寄存器读取芯片序列号，计算哈希后连同板型和设备类型名称
+ * 通过串口发送给 ESP8266。
+ *
+ * @return @ref JM_SUCCESS 成功
+ */
 int jm_stm32_send_uid()
 {
 
@@ -1270,6 +1539,12 @@ int jm_stm32_send_uid()
     return ret;
 }
 
+/**
+ * @brief 配置 WiFi 凭据（SSID + 密码）
+ * @param ssid WiFi 名称（可为 NULL）
+ * @param pwd  WiFi 密码（可为 NULL）
+ * @return @ref JM_SUCCESS 成功
+ */
 int jm_stm32_send_wifi_cfg(const char *ssid, const char *pwd)
 {
     uint16_t ssid_len = ssid ? (uint16_t)strlen(ssid) : 0;
@@ -1286,21 +1561,39 @@ int jm_stm32_send_wifi_cfg(const char *ssid, const char *pwd)
     return ret;
 }
 
+/**
+ * @brief 请求查询 WiFi 连接状态
+ * @return @ref JM_SUCCESS 成功
+ */
 int jm_stm32_send_wifi_status_req(void)
 {
     return jm_send_serial_packet(JM_TASK_APP_PROXY_WIFI_CONNECTED, 0, NULL, 0);
 }
 
+/**
+ * @brief 请求查询互联网连接状态
+ * @return @ref JM_SUCCESS 成功
+ */
 int jm_stm32_send_internet_status_req(void)
 {
     return jm_send_serial_packet(JM_TASK_APP_PROXY_INTERNET_ENABLE, 0, NULL, 0);
 }
 
+/**
+ * @brief 发起登录请求到 JM 平台
+ * @return @ref JM_SUCCESS 成功
+ */
 int jm_stm32_send_login(void)
 {
     return jm_send_serial_packet(JM_TASK_APP_PROXY_LOGIN, 0, NULL, 0);
 }
 
+/**
+ * @brief 发起 TCP 连接
+ * @param host 目标主机名或 IP 地址
+ * @param port 目标端口
+ * @return @ref JM_SUCCESS 成功
+ */
 int jm_stm32_send_tcp_connect(const char *host, uint16_t port)
 {
 
@@ -1320,6 +1613,11 @@ int jm_stm32_send_tcp_connect(const char *host, uint16_t port)
 
 }
 
+/**
+ * @brief 关闭 TCP 连接
+ * @param sock 套接字描述符
+ * @return @ref JM_SUCCESS 成功
+ */
 int jm_stm32_send_tcp_close(int8_t sock)
 {
     uint8_t payload[1];
@@ -1327,6 +1625,16 @@ int jm_stm32_send_tcp_close(int8_t sock)
     return jm_send_serial_packet(JM_TASK_APP_PROXY_TCP_CLOSE, 0, payload, 1);
 }
 
+/**
+ * @brief 通过已建立的 TCP 连接发送数据
+ *
+ * 直接发送 TCP 数据包（Type=2）到 ESP8266，由 ESP8266 通过 TCP 连接转发。
+ *
+ * @param sock  套接字描述符
+ * @param data  数据指针
+ * @param len   数据长度
+ * @return @ref JM_SUCCESS 成功
+ */
 int jm_stm32_send_tcp_data(int8_t sock, const uint8_t *payload, uint16_t plen)
 {
     if (!g_ctx.initialized || !g_ctx.config->uart_send) {
@@ -1363,6 +1671,14 @@ int jm_stm32_send_tcp_data(int8_t sock, const uint8_t *payload, uint16_t plen)
     return JM_SUCCESS;
 }
 
+/**
+ * @brief 通过 UDP 发送数据
+ * @param host  目标主机名或 IP 地址
+ * @param port  目标端口
+ * @param data  数据指针
+ * @param len   数据长度
+ * @return @ref JM_SUCCESS 成功
+ */
 int jm_stm32_send_udp_data(const char *host, uint16_t port, const uint8_t *payload, uint16_t plen)
 {
     if (!g_ctx.initialized || !g_ctx.config->uart_send) {
@@ -1401,18 +1717,38 @@ int jm_stm32_send_udp_data(const char *host, uint16_t port, const uint8_t *paylo
     return JM_SUCCESS;
 }
 
+/**
+ * @brief 发送语音播放文本
+ * @param text 待播放的文本内容
+ * @return @ref JM_SUCCESS 成功
+ */
 int jm_stm32_send_audio_play(const char *text)
 {
     uint16_t len = text ? (uint16_t)strlen(text) : 0;
     return jm_send_serial_packet(JM_TASK_APP_PROXY_AUDIO_PLAY, 0, (const uint8_t *)text, len);
 }
 
+/**
+ * @brief 发送控制事件到 ESP8266
+ * @param data 事件数据
+ * @param len  数据长度
+ * @return @ref JM_SUCCESS 成功，@ref JM_ERR_INVALID_PACKET 参数无效
+ */
 int jm_stm32_send_ctrl_event(const uint8_t *data, uint16_t len)
 {
     if (!data || len == 0) return JM_ERR_INVALID_PACKET;
     return jm_send_serial_packet(JM_TASK_APP_PROXY_CTRL_EVENT, 0, data, len);
 }
 
+/**
+ * @brief HAL 模式下轮询读取 UART 数据
+ *
+ * 从 HAL UART 硬件 FIFO 中读取所有已接收的字节并推入环形缓冲区。
+ * 仅当定义了 `USE_HAL_UART` 时有效。
+ *
+ * @param huart HAL UART 句柄指针
+ * @return 0 成功，-1 失败
+ */
 int jm_serial_read(void *huart)
 {
 #if defined(USE_HAL_UART)
@@ -1437,6 +1773,12 @@ int jm_serial_read(void *huart)
 #if JM_LOG_DEBUG_ENABLE || JM_LOG_ERROR_ENABLE
 #include <stdio.h>
 
+/* ===================== 日志输出 ===================== */
+
+/**
+ * @brief 通过 uart_send_log 发送单个字符
+ * @param ch 字符
+ */
 void jm_log_char(char ch)
 {
     if (!g_ctx.initialized || !g_ctx.config->uart_send_log) return;
@@ -1450,6 +1792,11 @@ void jm_log_char(char ch)
     }*/
 }
 
+/**
+ * @brief 通过 uart_send_log 发送格式化日志
+ * @param format 格式化字符串
+ * @param ... 可变参数
+ */
 void jm_log_print(const char *format, ...)
 {
     if (!g_ctx.initialized  || !g_ctx.config->uart_send_log) return;
@@ -1470,6 +1817,12 @@ void jm_log_print(const char *format, ...)
 }
 #endif
 
+/**
+ * @brief 通过 uart_send 直接发送数据
+ * @param data 数据指针
+ * @param len  数据长度
+ * @return @ref JM_SUCCESS 成功，@ref JM_ERR_NOT_READY 未初始化
+ */
 int jm_stm32_uart_send(const uint8_t *data, uint16_t len) {
     if (!g_ctx.initialized || !g_ctx.config->uart_send) {
         return JM_ERR_NOT_READY;
@@ -1478,11 +1831,16 @@ int jm_stm32_uart_send(const uint8_t *data, uint16_t len) {
     return JM_SUCCESS;
 }
 
+/* ===================== 延时函数 ===================== */
+
 /**
-  * @brief  微秒级延时
-  * @param  xus 延时时长，范围：0~233015
-  * @retval 无
-  */
+ * @brief 微秒级软件延时（基于 SysTick）
+ *
+ * 使用 SysTick 定时器进行精确延时，延时期间阻塞。
+ * 注意：调用前需确保系统时钟为 72MHz。
+ *
+ * @param xus 延时时长（微秒），范围：0~233015
+ */
 void jm_delay_us(uint32_t xus)
 {
 	SysTick->LOAD = 72 * xus;				//设置定时器重装值
@@ -1493,10 +1851,11 @@ void jm_delay_us(uint32_t xus)
 }
 
 /**
-  * @brief  毫秒级延时
-  * @param  xms 延时时长，范围：0~4294967295
-  * @retval 无
-  */
+ * @brief 毫秒级软件延时（基于 SysTick）
+ *
+ * 通过多次调用 @ref jm_delay_us 实现毫秒延时。
+ * @param xms 延时时长（毫秒），范围：0~4294967295
+ */
 void jm_delay_ms(uint32_t xms)
 {
 	while(xms--)
@@ -1506,6 +1865,8 @@ void jm_delay_ms(uint32_t xms)
 }
 
 #if JM_STM32_EVENT_ENABLE
+
+/* ===================== Event 系统 ===================== */
 
 #define JM_STM32_EVENT_QUEUE_SIZE 10
 #define JM_MAX_EVENT_LISTENERS 8
@@ -1517,15 +1878,25 @@ static uint8_t eventQueueHead = 0;
 static uint8_t eventQueueTail = 0;
 static bool eventQueueEmpty = true;
 
+/** @brief 最大事件监听器数量 */
+
+/**
+ * @brief 事件监听器注册表项
+ */
 typedef struct {
-    uint8_t eventType;
-    jm_event_listener_fn callback;
-    bool active;
+    uint8_t eventType;          /**< 监听的事件类型 */
+    jm_event_listener_fn callback; /**< 回调函数 */
+    bool active;                /**< 是否激活 */
 } jm_event_listener_entry_t;
 
+/** @brief 事件监听器注册表 */
 static jm_event_listener_entry_t eventListeners[JM_MAX_EVENT_LISTENERS];
 
-//上行事件给给网卡
+/**
+ * @brief 将本地事件上行转发到 ESP8266 netproxy
+ * @param e 事件指针
+ * @return true 成功
+ */
 bool jm_stm32_transEventToCard(jm_event_t *e) {
 
     //e->type, e->subType, e->data, g_ctx.config->user_data
@@ -1559,6 +1930,14 @@ bool jm_stm32_transEventToCard(jm_event_t *e) {
 	return true;	
 }
 
+/**
+ * @brief 投递事件到异步事件队列
+ * @param eventType 事件类型
+ * @param subType   子类型
+ * @param data      事件数据
+ * @param flag      内存管理标志
+ * @return true 成功入队，false 队列已满
+ */
 bool jm_stm32_postEvent(uint8_t eventType, uint16_t subType, void *data, uint8_t flag)
 {
     if (eventQueueHead == eventQueueTail && !eventQueueEmpty) {
@@ -1577,6 +1956,12 @@ bool jm_stm32_postEvent(uint8_t eventType, uint16_t subType, void *data, uint8_t
     return true;
 }
 
+/**
+ * @brief 注册事件监听器
+ * @param eventType 监听的事件类型
+ * @param callback  回调函数
+ * @return true 成功，false 失败
+ */
 bool jm_stm32_regEventListener(uint8_t eventType, jm_event_listener_fn callback)
 {
     for (int i = 0; i < JM_MAX_EVENT_LISTENERS; i++) {
@@ -1598,6 +1983,12 @@ bool jm_stm32_regEventListener(uint8_t eventType, jm_event_listener_fn callback)
     return false;
 }
 
+/**
+ * @brief 注销事件监听器
+ * @param eventType 事件类型
+ * @param callback  回调函数
+ * @return true 成功，false 失败
+ */
 bool jm_stm32_unregEventListener(uint8_t eventType, jm_event_listener_fn callback)
 {
     for (int i = 0; i < JM_MAX_EVENT_LISTENERS; i++) {
@@ -1611,6 +2002,10 @@ bool jm_stm32_unregEventListener(uint8_t eventType, jm_event_listener_fn callbac
     return true;
 }
 
+/**
+ * @brief 调用所有匹配事件类型的监听器
+ * @param event 事件指针
+ */
 static void _jm_invokeEventListener(jm_event_t *event)
 {
     for (int i = 0; i < JM_MAX_EVENT_LISTENERS; i++) {
@@ -1620,6 +2015,13 @@ static void _jm_invokeEventListener(jm_event_t *event)
     }
 }
 
+/**
+ * @brief 处理异步事件队列
+ *
+ * 从队列中取出一个事件，若非网卡上行则转发到网卡，
+ * 然后调用所有匹配的监听器。
+ * 由 @ref jm_stm32_loop 周期性调用。
+ */
 static void jm_stm32_runEvent(void)
 {
     if (eventQueueHead == eventQueueTail && eventQueueEmpty) {

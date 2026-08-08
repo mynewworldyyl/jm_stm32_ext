@@ -1,3 +1,8 @@
+/**
+ * @file jm_stm32_buf.c
+ * @brief 字节缓冲区操作实现
+ */
+
 #include "jm_stm32_buf.h"
 
 jm_buf_t *jm_buf_create(uint16_t capacity)
