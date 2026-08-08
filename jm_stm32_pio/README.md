@@ -53,18 +53,30 @@ ESP8266 端运行 `jm_client_esp8266` 的 netproxy 功能，负责解析串口�
 项目已包含 `platformio.ini`，主要配置：
 
 - **平台**：`ststm32`
-- **框架**：`stm32cube`
+- **框架**：`cmsis`（寄存器直驱模式，无需 HAL 库）
 - **烧录协议**：`stlink`
 - **监视器波特率**：115200
 - **本地库路径**：`../jm_stm32`（上游 jm_stm32 库）
 
+支持以下开发板（通过不同的 `env` 切换）：
+
+| 环境 | 板子 | 芯片 |
+|------|------|------|
+| `stm32f1_blackpill` | Blue Pill C8 | STM32F103C8T6 |
+| `stm32f1_bluepill` | Blue Pill C6 | STM32F103C6 |
+| `stm32f103_nucleo64` | Nucleo64 | STM32F103RB |
+| `stm32f411_nucleo64` | Nucleo64 | STM32F411RE |
+
 ### 4.2 编译模式选择
 
-项目默认使用**寄存器直驱模式**（无需 HAL 库），体积小、速度快。
+项目默认使用**寄存器直驱模式**（CMSIS），无需 HAL 库，体积小、速度快。
 
 如需使用 HAL 库模式，修改 `platformio.ini`：
 
 ```ini
+[env:stm32f1_blackpill]
+board = bluepill_f103c8
+framework = stm32cube
 build_flags =
     -DUSE_HAL_UART
     -DSTM32F103xB
@@ -81,13 +93,13 @@ build_flags =
 #### 5.1.1 系统时间函数
 
 ```c
-static uint32_t get_sys_time_ms(void)
+static uint32_t get_sys_time(void)
 ```
 
 返回毫秒级系统时间，用于协议超时、心跳间隔等计时。
 
-- **寄存器模式**：基于 SysTick_Handler 累加
-- **HAL 模式**：使用 `HAL_GetTick()`
+- **寄存器直驱模式（默认）**：基于 `SysTick_Handler` 累加 `sys_tick_ms`
+- **HAL 模式（可选）**：使用 `HAL_GetTick()`
 
 用户如果需要更高精度或不同时间源，可修改此函数。
 
@@ -99,8 +111,8 @@ static void uart_send(const uint8_t *data, uint16_t len)
 
 将数据通过 UART 发送给 ESP8266。
 
-- **寄存器模式**：轮询 USART1->SR 的 TXE 标志
-- **HAL 模式**：使用 `HAL_UART_Transmit()`
+- **寄存器直驱模式（默认）**：轮询 `USART1->SR` 的 TXE 标志
+- **HAL 模式（可选）**：使用 `HAL_UART_Transmit()`
 
 如果用户更换了 UART 端口或使用了 DMA，需要修改此函数。
 
@@ -114,23 +126,74 @@ static void on_event(uint8_t event_type, uint16_t sub_type, void *data, void *us
 
 #### 5.1.4 主循环
 
+**寄存器直驱模式（默认）**：UART 接收通过中断完成，`main` 循环中无需轮询读取：
+
 ```c
 int main(void)
 {
-    // 初始化 ...
+    SystemClock_Config();          // 寄存器直驱时钟配置
+    SysTick_Config(72000);         // 1ms 系统时钟
+    uart_init();                   // USART1 初始化（使能 RX 中断）
+
+    jm_config_t cfg = {
+        .get_sys_time_ms = get_sys_time,
+        .uart_send      = uart_send,
+        .uart_send_log  = uart_send_log,
+        .event_cb       = on_event,
+        .user_data      = NULL,
+    };
     jm_stm32_init(&cfg);
-    
+
     while (1) {
-        jm_serial_read(&huart1);  // 读取 UART 数据并喂给 jm_stm32 库
+        jm_stm32_loop();          // 处理协议状态机（超时、事件派发）
+        // 用户业务代码 ...
+    }
+}
+```
+
+UART 接收中断处理函数：
+
+```c
+void USART1_IRQHandler(void)
+{
+    if (USART1->SR & USART_SR_RXNE) {
+        uint8_t byte = (uint8_t)(USART1->DR & 0xFF);
+        jm_stm32_uart_push_byte(byte);
+    }
+}
+```
+
+- `UART 中断`：通过 `USART1_IRQHandler` 将收到的字节推给 `jm_stm32_uart_push_byte()`
+- `jm_stm32_loop()`：驱动协议状态机，处理超时、事件派发等
+- 用户业务代码放在主循环中，或使用定时器/中断
+
+**HAL 模式（可选）**：UART 接收通过 `jm_serial_read()` 轮询读取：
+
+```c
+int main(void)
+{
+    HAL_Init();
+    SystemClock_Config();
+    MX_USART1_UART_Init();
+
+    jm_config_t cfg = {
+        .get_sys_time_ms = get_sys_time,
+        .uart_send      = uart_send,
+        .event_cb       = on_event,
+        .user_data      = NULL,
+    };
+    jm_stm32_init(&cfg);
+
+    while (1) {
+        jm_serial_read(&huart1);  // 轮询读取 UART 数据并喂给 jm_stm32 库
         jm_stm32_loop();          // 处理协议状态机
         // 用户业务代码 ...
     }
 }
 ```
 
-- `jm_serial_read()`：从 UART 读取字节并交给协议解析
+- `jm_serial_read()`：从 UART 读取字节并交给协议解析（仅 HAL 模式可用）
 - `jm_stm32_loop()`：驱动协议状态机，处理超时、事件派发等
-- 用户业务代码放在主循环中，或使用定时器/中断
 
 ### 5.2 集成到用户项目
 
@@ -140,12 +203,14 @@ int main(void)
 - `src/main.c` — 主程序框架
 - `platformio.ini` — 项目配置模板
 - `lib/jm_stm32` 或 `lib_extra_dirs` 引用的 jm_stm32 库
+- `../jm_stm32/jm_stm32_boards/board001/jm_pcfg.h` — 库配置文件（如需自定义）
 
 **步骤 2：修改 `jm_config_t` 配置**
 ```c
 jm_config_t cfg = {
     .get_sys_time_ms = get_sys_time,  // 必须实现
     .uart_send      = uart_send,      // 必须实现
+    .uart_send_log  = uart_send_log,   // 日志输出（寄存器直驱模式下使用 USART2）
     .event_cb       = on_event,       // 用户实现业务逻辑
     .user_data      = NULL,           // 用户自定义数据
 };
@@ -339,10 +404,16 @@ STM32 端提供独立的日志输出功能，通过 USART2（仅 TX）输出，�
 
 #### 8.1.1 开启日志
 
-在 `platformio.ini` 中启用日志宏：
+日志功能通过 `jm_pcfg.h` 宏控制：
 
+```c
+#define JM_LOG_DEBUG_ENABLE 1   // 调试日志
+#define JM_LOG_ERROR_ENABLE 1   // 错误日志
+```
 
-开启后，`jm_stm32` 库会初始化 USART2（PA2），日志输出不会占用与 ESP8266 通信的 USART1。
+在 PlatformIO 项目中，该配置文件位于 `../jm_stm32/jm_stm32_boards/board001/jm_pcfg.h`。
+
+寄存器直驱模式下，日志通过 USART2（PA2，仅 TX）输出，波特率 115200，与业务串口 USART1 物理隔离。
 
 #### 8.1.2 日志宏
 
@@ -378,15 +449,14 @@ JM_LOG('c');
 
 ### 8.3 运行时串口日志
 
-通过 PlatformIO 监视器查看 USART1 业务串口日志：
+日志输出通过 USART2（PA2），需使用 USB-TTL 模块连接 STM32 的 PA2 引脚来查看：
 
-```bat
-jm.bat monitor stm32f1_bluepill
-```
+| STM32 引脚 | 说明 |
+|-----------|------|
+| PA2 (USART2 TX) | 日志输出，连接 USB-TTL 模块的 RXD |
+| GND | 共地 |
 
-或使用 VS Code 工具栏的 Serial Monitor 按钮。
-
-日志输出通过 USART2，需使用独立串口工具或另一路 USB-TTL 模块查看。
+日志内容包括事件回调、初始化状态、错误信息等，由 `JM_LOG_DEBUG_ENABLE` 和 `JM_LOG_ERROR_ENABLE` 宏控制。
 
 ### 8.4 协议调试
 
@@ -465,16 +535,16 @@ A: 检查 `JM_EVENT_TCP_CONNECTED` 事件中的 `err_code`，确认目标服务�
 A: 这是正常的。TCP 数据可能分多个包到达，用户需要根据应用层协议自行组包。
 
 **Q: 如何更换 UART 端口？**
-A: 修改 `src/main.c` 中的 `uart_init()`（寄存器模式）或 `MX_USARTx_UART_Init()`（HAL 模式），并同步修改 `main()` 中 `jm_serial_read()` 的参数。
+A: 修改 `src/main.c` 中的 `uart_init()`（寄存器直驱模式）或 `MX_USARTx_UART_Init()`（HAL 模式），并同步修改 `uart_send()`、`uart_send_log()` 以及 `USART1_IRQHandler` 的端口映射。
 
 ## 12. 相关文件
 
 | 文件 | 说明 |
 |------|------|
-| `src/main.c` | STM32 主程序，实现 UART 回调、事件处理、主循环 |
-| `src/stm32f1xx_hal_msp.c` | HAL 库底层回调 |
+| `src/main.c` | STM32 主程序，实现 UART 初始化、事件处理、主循环 |
 | `platformio.ini` | PlatformIO 项目配置 |
 | `jm.bat` | 构建/烧录/监视快捷脚本 |
 | `jm_manual.md` | jm.bat 使用手册 |
 | `../jm_stm32/` | jm_stm32 库源码（协议栈实现） |
+| `../jm_stm32/jm_stm32_boards/board001/jm_pcfg.h` | 库配置文件（日志、事件、测试模块宏开关） |
 | `E:\arduinoLib\Arduino\libraries\jm_client_esp8266\src\netproxy\` | ESP8266 netproxy 源码 |

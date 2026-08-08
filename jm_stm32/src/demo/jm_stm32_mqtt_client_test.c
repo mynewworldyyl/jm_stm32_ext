@@ -7,7 +7,7 @@
 #include "stm32f1xx.h"
 #endif
 
-#if JM_MQTT_CLIENT_ENABLE
+#if JM_MQTT_CLIENT_TEST_ENABLE && JM_MQTT_CLIENT_ENABLE
 
 #define MQTT_BROKER_HOST     "192.168.3.10"
 #define MQTT_BROKER_PORT     1883
@@ -167,4 +167,4 @@ void jm_mqtt_client_test_loop(void) {
     
 }
 
-#endif
+#endif //#if JM_MQTT_CLIENT_TEST_ENABLE && JM_MQTT_CLIENT_ENABLE

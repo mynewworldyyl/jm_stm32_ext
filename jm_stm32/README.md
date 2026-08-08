@@ -4,16 +4,38 @@ Minimal STM32 serial proxy client for ESP8266 network connectivity.
 
 ## Overview
 
-This library enables STM32F103C8T6 (and similar) to access WiFi networks through an ESP8266 acting as a network proxy, communicating over UART. It replaces the heavy `jm_client_stm32` library with a lightweight implementation that fits within the 64KB Flash constraint of C8T6.
+This library enables STM32F103C8T6 (and similar) to access WiFi networks through an ESP8266 acting as a network proxy, communicating over UART. It uses the **register-direct (CMSIS) API** as the default development mode, with optional HAL library support.
+
+The library is lightweight and fits within the 64KB Flash constraint of C8T6.
 
 ## Features
 
 - UART-based communication with ESP8266 network proxy
+- Register-direct (CMSIS) mode as default — no HAL dependency required
+- Optional HAL library mode (define `USE_HAL_UART` to enable)
 - Packet fragmentation/reassembly support
 - Callback-based event handling
 - Minimal memory footprint
-- No dependency on jm_client, jm_libs, or Arduino core
 - Compatible with Keil/STM32 standard library development
+
+## Supported Development Modes
+
+### Register-direct Mode (Default)
+
+Uses CMSIS register definitions directly. Framework: `cmsis`. No HAL library needed.
+
+- UART communication via direct register access
+- System clock configured via RCC registers
+- SysTick for timing
+- Interrupt-driven UART RX (`USART1_IRQHandler`)
+
+### HAL Library Mode (Optional)
+
+Define `USE_HAL_UART` in build flags to use STM32Cube HAL. Framework: `stm32cube`.
+
+- Uses `HAL_UART_Transmit()` for sending
+- Uses `HAL_GetTick()` for timing
+- Uses `jm_serial_read(&huart1)` for polling-based UART reads
 
 ## Protocol
 
@@ -40,14 +62,102 @@ For serial commands (`JM_SERIALNET_TYPE_SERIAL`), the payload is automatically w
 
 ## Usage
 
-### 编译选项
-
-在使用轮询读接口前，请在工程中定义 `USE_HAL_UART`（例如在编译器预定义宏里添加），否则 `jm_serial_read()` 将不可用。
-
-### Initialization (HAL)
+### Initialization (Register-direct Mode — Default)
 
 ```c
 #include "jm_stm32.h"
+#include "stm32f1xx.h"
+
+static volatile uint32_t sys_tick_ms = 0;
+
+void SysTick_Handler(void)
+{
+    sys_tick_ms++;
+}
+
+static uint32_t get_sys_time(void)
+{
+    return sys_tick_ms;
+}
+
+static void uart_send(const uint8_t *data, uint16_t len)
+{
+    for (uint16_t i = 0; i < len; i++) {
+        while (!(USART1->SR & USART_SR_TXE));
+        USART1->DR = data[i];
+    }
+    while (!(USART1->SR & USART_SR_TC));
+}
+
+static void uart_send_log(const uint8_t *data, uint16_t len)
+{
+    for (uint16_t i = 0; i < len; i++) {
+        while (!(USART2->SR & USART_SR_TXE));
+        USART2->DR = data[i];
+    }
+}
+
+static void on_event(uint8_t event_type, uint16_t sub_type, void *data, void *user_data)
+{
+    // ... handle events ...
+}
+
+void USART1_IRQHandler(void)
+{
+    if (USART1->SR & USART_SR_RXNE) {
+        uint8_t byte = (uint8_t)(USART1->DR & 0xFF);
+        jm_stm32_uart_push_byte(byte);
+    }
+}
+
+int main(void)
+{
+    SystemInit();
+    // Configure system clock (register access)
+    RCC->CR |= RCC_CR_HSEON;
+    while (!(RCC->CR & RCC_CR_HSERDY));
+    // ... PLL config ...
+
+    SysTick_Config(SystemCoreClock / 1000);  // 1ms tick
+
+    // UART1 init (for ESP8266 communication)
+    RCC->APB2ENR |= RCC_APB2ENR_USART1EN | RCC_APB2ENR_IOPAEN;
+    // PA9=TX, PA10=RX
+    GPIOA->CRH = (GPIOA->CRH & ~((0xF << 4) | (0xF << 8))) | (0xB << 4) | (0x4 << 8);
+    USART1->BRR = SystemCoreClock / 115200;
+    USART1->CR1 = USART_CR1_TE | USART_CR1_RE | USART_CR1_RXNEIE | USART_CR1_UE;
+    NVIC_EnableIRQ(USART1_IRQn);
+
+    jm_config_t config = {
+        .get_sys_time_ms = get_sys_time,
+        .uart_send      = uart_send,
+        .uart_send_log  = uart_send_log,
+        .event_cb       = on_event,
+        .user_data      = NULL,
+    };
+
+    int ret = jm_stm32_init(&config);
+    if (ret != JM_SUCCESS) {
+        while (1);
+    }
+
+    while (1) {
+        jm_stm32_loop();
+        // Your application code
+    }
+}
+```
+
+### Initialization (HAL Library Mode — Optional)
+
+To use HAL mode, define `USE_HAL_UART` in build flags:
+
+```c
+#include "jm_stm32.h"
+#include "stm32f1xx_hal.h"
+
+extern UART_HandleTypeDef huart1;
+extern UART_HandleTypeDef huart2;
 
 static uint32_t get_sys_time(void) {
     return HAL_GetTick();
@@ -76,40 +186,39 @@ int main(void) {
     jm_stm32_init(&config);
 
     while (1) {
-        jm_serial_read(&huart1);  // 轮询读取 UART 字节并喂给协议解析
-        jm_stm32_loop();          // 处理超时
+        jm_serial_read(&huart1);  // Polling UART read
+        jm_stm32_loop();
         // Your application code
     }
 }
 ```
 
-### 轮询读接口
+### 轮询读接口 (HAL Only)
+
+HAL 模式下可使用轮询接口读取 UART 数据：
 
 ```c
-// 在 main 循环中调用，自动读取 UART 硬件 FIFO 中所有已接收字节
 int ret = jm_serial_read(&huart1);
 if (ret == 0) {
-    // 有新数据被处理
+    // Data was processed
 }
 ```
 
-### 原始串口发送
+### UART RX ISR (Register-direct Mode)
 
-### UART RX ISR（中断模式，可选）
-
-如果使用中断接收，依然可以保留 ISR 方式：
+Register-direct mode uses interrupt-driven UART RX. The ISR directly calls `jm_stm32_uart_push_byte()`:
 
 ```c
-void USART1_IRQHandler(void) {
-    uint8_t byte;
-    if (__HAL_UART_GET_FLAG(&huart1, UART_FLAG_RXNE) != RESET) {
-        byte = (uint8_t)(huart1.Instance->DR & 0xFF);
-        jm_stm32_uart_rx_byte(byte);
+void USART1_IRQHandler(void)
+{
+    if (USART1->SR & USART_SR_RXNE) {
+        uint8_t byte = (uint8_t)(USART1->DR & 0xFF);
+        jm_stm32_uart_push_byte(byte);
     }
 }
 ```
 
-### Sending Commands
+## Sending Commands
 
 ```c
 // Send WiFi credentials
@@ -162,6 +271,8 @@ See `jm_stm32.h` for complete API documentation.
 - STM32F103C8T6 (and other STM32F1 series)
 - Works with `jm_client_esp8266` netproxy component
 - No changes required on ESP8266 side
+- Default mode: register-direct (CMSIS), no HAL dependency
+- Optional: HAL library mode (define `USE_HAL_UART`)
 
 ## License
 
