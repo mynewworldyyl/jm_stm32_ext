@@ -70,19 +70,18 @@
 #define MQTT_PUB_TOPIC       "stm32/test"     /**< 发布主题 */
 #define MQTT_PUB_MSG         "Hello from STM32 MQTT client" /**< 默认发布消息 */
 #define MQTT_TEST_BTN_PIN    0               /**< 按键引脚 (PA0) */
+#define MQTT_TEST_LED_PIN    1               /**< LED引脚 (PA1) */
 #define BTN_DEBOUNCE_MS      70              /**< 按键去抵抗时间（ms） */
 
 /* ===================== 全局状态 ===================== */
 
 static uint8_t g_mqtt_connected = 0;    /**< MQTT 连接状态 */
-static uint32_t g_last_pub_time = 0;    /**< 上次发布时间 */
+//static uint32_t g_last_pub_time = 0;    /**< 上次发布时间 */
 static uint32_t g_last_sub_time = 0;   /**< 上次订阅时间 */
 static uint8_t g_subscribed = 0;       /**< 订阅状态 */
 static uint32_t g_btn_last_time = 0;   /**< 上次按键触发时间 */
 static uint8_t g_btn_last_state = 1;   /**< 上次按键状态 */
 static uint8_t g_btn_triggered = 0;    /**< 按键触发标志 */
-
-static bool inited = false;            /**< 初始化标志 */
 
 /* ===================== 按键初始化 ===================== */
 
@@ -116,6 +115,40 @@ static uint8_t button_read(void)
 #endif
 }
 
+/* ===================== LED 控制 ===================== */
+
+/** @brief 初始化LED引脚 (PA1 为推挽输出，默认低电平熄灭) */
+static void led_init(void)
+{
+#if defined(USE_HAL_UART)
+    GPIO_InitTypeDef GPIO_InitStruct = {0};
+    GPIO_InitStruct.Pin = GPIO_PIN_1;
+    GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+    HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_1, GPIO_PIN_RESET);
+#else
+    RCC->APB2ENR |= RCC_APB2ENR_IOPAEN;
+    GPIOA->CRL &= ~(0xF << 4);
+    GPIOA->CRL |= (0x3 << 4);
+    GPIOA->ODR &= ~(1 << 1);
+#endif
+}
+
+/** @brief 设置LED状态 */
+static void led_set(uint8_t on)
+{
+#if defined(USE_HAL_UART)
+    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_1, on ? GPIO_PIN_SET : GPIO_PIN_RESET);
+#else
+    if (on) {
+        GPIOA->ODR |= (1 << 1);
+    } else {
+        GPIOA->ODR &= ~(1 << 1);
+    }
+#endif
+}
+
 /* ===================== MQTT 回调函数 ===================== */
 
 /**
@@ -126,8 +159,18 @@ static uint8_t button_read(void)
  */
 static void mqtt_client_message_callback(const char *topic, const uint8_t *payload, uint16_t len) {
     JM_LOG_D("MQTT client RX: topic=%s len=%u", topic, len);
-    //*(payload+len) = '\0';
-    JM_LOG_D("Pl=%s", (char*)payload);
+    if (len > 0 && payload != NULL) {
+        char buf[16];
+        uint16_t copy_len = (len < sizeof(buf) - 1) ? len : sizeof(buf) - 1;
+        memcpy(buf, payload, copy_len);
+        buf[copy_len] = '\0';
+        JM_LOG_D("Pl=%s", buf);
+        if (strcmp(buf, "on") == 0) {
+            led_set(1);
+        } else if (strcmp(buf, "off") == 0) {
+            led_set(0);
+        }
+    }
 }
 
 /**
@@ -158,9 +201,23 @@ static void mqtt_client_disconnect_callback(void) {
  * @param config jm_stm32 配置结构
  */
 void jm_mqtt_client_test_init(const jm_config_t *config) {
+    
     jm_mqtt_client_init(mqtt_client_message_callback,
                         mqtt_client_connect_callback,
                         mqtt_client_disconnect_callback);
+        button_init();
+        led_init();
+        JM_LOG_D("MQTT inito %s:%d", MQTT_BROKER_HOST, MQTT_BROKER_PORT);
+
+        int rc = jm_mqtt_client_connect(MQTT_BROKER_HOST, MQTT_BROKER_PORT,
+                                        MQTT_CLIENT_ID, MQTT_KEEPALIVE,
+                                        "jmicro", "jmicro123");
+
+        JM_LOG_D("mqcR");
+
+        if (rc != JM_SUCCESS) {
+            JM_LOG_E("MQTT client connect failed rc=%d", rc);
+        }
 }
 
 /**
@@ -173,24 +230,6 @@ void jm_mqtt_client_test_init(const jm_config_t *config) {
  * 应在主循环中周期性调用。
  */
 void jm_mqtt_client_test_loop(void) {
-
-    if(!inited) {
-        button_init();
-        JM_LOG_D("MQTT inito %s:%d", MQTT_BROKER_HOST, MQTT_BROKER_PORT);
-
-        int rc = jm_mqtt_client_connect(MQTT_BROKER_HOST, MQTT_BROKER_PORT,
-                                        MQTT_CLIENT_ID, MQTT_KEEPALIVE,
-                                        "jmicro", "jmicro123");
-
-        JM_LOG_D("mqcR");
-
-        if (rc != JM_SUCCESS) {
-            JM_LOG_E("MQTT client connect failed rc=%d", rc);
-        }
-        inited = true;
-        return;
-    }
-
 
     if (!g_mqtt_connected) {
         // JM_LOG_E("C");
@@ -256,8 +295,7 @@ void jm_mqtt_client_test_loop(void) {
         }
     }
 */
-    jm_mqtt_client_loop();
-    
+   
 }
 
 #endif //#if JM_MQTT_CLIENT_TEST_ENABLE && JM_MQTT_CLIENT_ENABLE

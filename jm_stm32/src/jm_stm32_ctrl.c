@@ -416,6 +416,17 @@ jm_emap_t *ctrl_remote_ctrlGpio(jm_emap_t *ps) {
             jm_emap_putInt(h, "status", v ? 1 : 0, false);
             break;
         }
+
+         case 100: {
+            uint32_t scl = jm_emap_getInt(ps, "scl", 0);
+            uint32_t sda = jm_emap_getInt(ps, "sda", 0);
+            uint32_t rot = jm_emap_getInt(ps, "rot", 0);
+            JM_LOG_D("scl=%d sda=%d rot=%d", scl, sda, rot);
+
+
+            break;
+        }
+
         default: {
             jm_emap_putInt(h, "code", 1, false);
             jm_emap_putStr(h, "msg", "Invalid op code", false, false);

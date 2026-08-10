@@ -15,6 +15,8 @@
 extern "C" {
 #endif
 
+
+/** =========================GPIO开始============================== */
 #if JM_GPIO_CTRL_ENABLE == 1
 
 /**
@@ -23,7 +25,7 @@ extern "C" {
  */
 void jm_gpio_init(void);
 
-#endif
+#endif //#if JM_GPIO_CTRL_ENABLE == 1
 
 #if JM_STM32_TESTEVENT_ENABLE == 1
 
@@ -32,8 +34,27 @@ void jm_gpio_init(void);
  */
 void jm_test_event_init(void);
 
-#endif
+#endif //#if JM_STM32_TESTEVENT_ENABLE == 1
+/** =========================GPIO结束============================= */
 
+
+#if JM_STM32_UDP_ENABLE == 1
+/**
+ * @brief UDP数据
+ */
+void jm_onUdpData(jm_buf_t *buf );
+
+#endif //#if JM_STM32_UDP_ENABLE == 1
+
+
+#if JM_STM32_TCP_ENABLE == 1
+/**
+ * @brief UDP数据
+ */
+void jm_onTcpEvent(uint8_t eventType, void *data);
+#endif //#if JM_STM32_TCP_ENABLE == 1
+
+/** =========================TCP开始============================== */
 #if JM_STM32_TESTTCP_ENABLE
 
 /**
@@ -55,7 +76,11 @@ void jm_tcp_test_loop(void);
 void jm_tcp_test_on_event(uint8_t event_type, void *data);
 
 #endif /* JM_STM32_TESTTCP_ENABLE */
+/** =========================TCP结束============================== */
 
+
+
+/** =========================UDP开始============================== */
 #if JM_STM32_TESTUDP_ENABLE
 
 /**
@@ -77,36 +102,36 @@ void jm_udp_test_loop(void);
 void jm_udp_test_on_event(uint8_t event_type, jm_buf_t *data);
 
 #endif /* JM_STM32_TESTUDP_ENABLE */
+/** =========================UDP结束============================== */
 
-#if JM_MQTT_PROXY_ENABLE
 
-#include "jm_mqtt_proxy.h"
+/** =========================HTTP开始============================== */
+
+
+
+#if JM_HTTP_CLIENT_TEST_ENABLE && JM_MQTT_CLIENT_ENABLE
 
 /**
- * @brief MQTT 代理模块初始化
+ * @brief HTTP 客户端测试模块初始化
  * @param config jm_stm32 配置结构
  */
-void jm_mqtt_proxy_init(const jm_config_t *config);
+void jm_http_client_test_init(const jm_config_t *config);
 
 /**
- * @brief MQTT 代理模块轮询
+ * @brief HTTP 客户端测试模块轮询
  */
-void jm_mqtt_proxy_loop(void);
+void jm_http_client_test_loop(void);
 
-/**
- * @brief MQTT 代理测试模块初始化
- * @param config jm_stm32 配置结构
- */
-void jm_mqtt_test_init(const jm_config_t *config);
 
-/**
- * @brief MQTT 代理测试模块轮询
- */
-void jm_mqtt_test_loop(void);
+#endif /* JM_HTTP_CLIENT_TEST_ENABLE && JM_MQTT_CLIENT_ENABLE */
 
-#endif
+/** ==========================HTTP结束============================== */
 
-#if JM_MQTT_CLIENT_ENABLE
+
+
+/** =========================MQTT开始============================== */
+
+#if JM_MQTT_CLIENT_ENABLE 
 
 #include "jm_mqtt_client.h"
 
@@ -126,6 +151,8 @@ int jm_mqtt_client_init(jm_mqtt_client_msg_cb msg_cb,
  */
 void jm_mqtt_client_loop(void);
 
+
+//以下两个是测试用的
 /**
  * @brief MQTT 客户端测试模块初始化
  * @param config jm_stm32 配置结构
@@ -138,6 +165,11 @@ void jm_mqtt_client_test_init(const jm_config_t *config);
 void jm_mqtt_client_test_loop(void);
 
 #endif /* JM_MQTT_CLIENT_ENABLE */
+
+/** =========================MQTT结束============================== */
+
+
+
 
 #ifdef __cplusplus
 }

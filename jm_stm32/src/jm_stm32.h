@@ -65,6 +65,7 @@ extern "C" {
 #define JM_SERIALNET_TYPE_UDP_COM  4  /**< ESP→STM32：非 JM 平台 UDP 透传 */
 #define JM_SERIALNET_TYPE_SYS      5  /**< 双向：系统底层命令 */
 #define JM_SERIALNET_TYPE_MQTT     6  /**< MQTT 代理数据 */
+#define JM_SERIALNET_TYPE_HTTP     7  /**< HTTP 代理数据 */
 
 /* ===================== 控制命令子类型 ===================== */
 
@@ -160,6 +161,10 @@ extern "C" {
 #define JM_EVENT_TCP_DATA          12
 /** @brief UDP 接收数据事件 */
 #define JM_EVENT_UDP_DATA          13
+/** @brief HTTP 响应事件 */
+#define JM_EVENT_HTTP_RESPONSE     14
+/** @brief HTTP 错误事件 */
+#define JM_EVENT_HTTP_ERROR        15
 
 /**
  * @brief 序列化前缀类型标识
@@ -638,6 +643,47 @@ int jm_stm32_uart_send(const uint8_t *data, uint16_t len);
  * @param len  数据长度
  */
 void jm_mqtt_client_on_serial_data(const uint8_t *data, uint16_t len);
+
+/**
+ * @brief 处理来自 ESP8266 的 HTTP 串口数据
+ * @param data 数据指针
+ * @param len  数据长度
+ */
+void jm_http_client_on_serial_data(const uint8_t *data, uint16_t len);
+
+/**
+ * @brief 发送串口数据包（内部使用，也可用于自定义协议）
+ * @param subtype     子类型
+ * @param msg_id      消息 ID
+ * @param payload     数据负载
+ * @param payload_len 负载长度
+ * @return @ref JM_SUCCESS 成功，@ref JM_ERR_NOT_READY 未初始化
+ */
+int jm_send_serial_packet(uint16_t subtype, uint16_t msg_id, const uint8_t *payload, uint16_t payload_len);
+
+/* ===================== 引脚中断 API ===================== */
+
+/**
+ * @brief 注册引脚中断
+ * @param gpioNo      引脚编号（0~31）
+ * @param triggerType 触发类型：1=上升沿，2=下降沿，3=边沿变化
+ * @return true 成功，false 失败
+ */
+bool jm_stm32_registerPinInterrupt(uint16_t gpioNo, uint8_t triggerType);
+
+/**
+ * @brief 注销引脚中断
+ * @param gpioNo 引脚编号（0~31）
+ * @return true 成功，false 失败
+ */
+bool jm_stm32_unregisterPinInterrupt(uint16_t gpioNo);
+
+/**
+ * @brief 上报引脚中断事件到 ESP8266
+ * @param pin 引脚编号
+ * @return true 成功
+ */
+int jm_stm32_pinInterrupt(const uint16_t pin);
 
 /* ===================== 组件管理 ===================== */
 

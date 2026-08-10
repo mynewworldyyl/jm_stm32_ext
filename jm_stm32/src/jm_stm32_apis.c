@@ -3,7 +3,7 @@
  * @brief 蜂鸣器/音调、脉冲检测、移位寄存器、AT24CXX EEPROM、I2C 接口实现
  *
  * 使用寄存器直驱方式，无需 HAL 库。
- * 受 @ref JM_TONE_ENABLE、@ref JM_AT24CXX_ENABLE、
+ * 受 @ref JM_APIS_ENABLE@ref JM_AT24CXX_ENABLE、
  * @ref JM_I2C_WRAPPER_ENABLE 宏控制编译。
  */
 
@@ -41,7 +41,7 @@ static uint16_t pin_to_mask(uint32_t pin) {
     return 0;
 }
 
-#if JM_TONE_ENABLE==1
+#if JM_APIS_ENABLE==1
 
 /**
  * @brief 音调/PWM 信息结构
@@ -463,7 +463,7 @@ static void tone_shiftOut(uint32_t dataPin, uint32_t clockPin, uint8_t bitOrder,
         clkPort->BSRR = ((uint32_t)clkMask << 16);
     }
 }
-#endif // JM_TONE_ENABLE==1
+#endif // JM_APIS_ENABLE==1
 
 #if JM_AT24CXX_ENABLE==1
 
@@ -1043,7 +1043,7 @@ jm_emap_t *jm_stm32_ctrl_def(jm_emap_t *ps) {
     int8_t op = jm_emap_getInt(ps, "op", 0);
     
     switch (op) {
-#if JM_TONE_ENABLE==1
+#if JM_APIS_ENABLE==1
         case 11: {
             uint32_t pin = jm_emap_getInt(ps, "p", 0);
             uint32_t freq = jm_emap_getInt(ps, "f", 0);
@@ -1092,7 +1092,7 @@ jm_emap_t *jm_stm32_ctrl_def(jm_emap_t *ps) {
             jm_emap_putInt(h, "status", 1, false);
             break;
         }
-#endif // JM_TONE_ENABLE==1
+#endif // JM_APIS_ENABLE==1
 
 #if JM_STM32_INTERRUPT_ENABLE==1
         case 17: {

@@ -2,6 +2,9 @@
 
 ## 架构概述
 
+目前支持的最新的JS API项目路径
+https://github.com/mynewworldyyl/jmicro-devModule
+
 jm_stm32 库通过**串口代理协议**实现 JS 环境（如 H5 浏览器、微信小程序等）与 STM32 硬件的通信。
 
 ```
@@ -45,12 +48,12 @@ JS 环境通过 `funName`（对应 defId）字段选择调用哪个 STM32 函数
 
 | OpCode | 功能 | 参数字段 | 配置宏 |
 |--------|------|----------|--------|
-| [11](README_TONE.md) | 播放音调 | `p`(pin), `f`(freq), `d`(duration) | `JM_TONE_ENABLE` |
-| [12](README_TONE.md) | 停止音调 | `p`(pin) | `JM_TONE_ENABLE` |
-| [13](README_PULSE.md) | 脉冲检测 (pulseIn) | `p`(pin), `s`(state), `t`(timeout) | `JM_TONE_ENABLE` |
-| [14](README_PULSE.md) | 脉冲检测 (pulseInLong) | `p`(pin), `s`(state), `t`(timeout) | `JM_TONE_ENABLE` |
-| [15](README_SHIFT.md) | 移位输入 (shiftIn) | `p`(dataPin), `c`(clockPin), `b`(bitOrder) | `JM_TONE_ENABLE` |
-| [16](README_SHIFT.md) | 移位输出 (shiftOut) | `p`(dataPin), `c`(clockPin), `b`(bitOrder), `v`(val) | `JM_TONE_ENABLE` |
+| [11](README_TONE.md) | 播放音调 | `p`(pin), `f`(freq), `d`(duration) | `JM_APIS_ENABLE` |
+| [12](README_TONE.md) | 停止音调 | `p`(pin) | `JM_APIS_ENABLE` |
+| [13](README_PULSE.md) | 脉冲检测 (pulseIn) | `p`(pin), `s`(state), `t`(timeout) | `JM_APIS_ENABLE` |
+| [14](README_PULSE.md) | 脉冲检测 (pulseInLong) | `p`(pin), `s`(state), `t`(timeout) | `JM_APIS_ENABLE` |
+| [15](README_SHIFT.md) | 移位输入 (shiftIn) | `p`(dataPin), `c`(clockPin), `b`(bitOrder) | `JM_APIS_ENABLE` |
+| [16](README_SHIFT.md) | 移位输出 (shiftOut) | `p`(dataPin), `c`(clockPin), `b`(bitOrder), `v`(val) | `JM_APIS_ENABLE` |
 | [17](README_INTERRUPT.md) | 关闭中断 (noInterrupts) | 无 | `JM_STM32_INTERRUPT_ENABLE` |
 | [18](README_INTERRUPT.md) | 开启中断 (interrupts) | 无 | `JM_STM32_INTERRUPT_ENABLE` |
 | [45](README_I2C.md) | I2C 初始化 | `i`(wireId), `a`(address) | `JM_I2C_WRAPPER_ENABLE` |

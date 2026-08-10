@@ -285,9 +285,9 @@ jm_stm32 库通过串口代理协议支持 JS 环境（H5、微信小程序等�
 
 | 模块 | OpCode | 说明 | 配置宏 |
 |------|--------|------|--------|
-| [Tone 音乐](src/README_TONE.md) | 11, 12 | 音调播放/停止 | `JM_TONE_ENABLE` |
-| [Pulse 脉冲检测](src/README_PULSE.md) | 13, 14 | 脉冲宽度测量 | `JM_TONE_ENABLE` |
-| [Shift 移位寄存器](src/README_SHIFT.md) | 15, 16 | 移位数据读写 | `JM_TONE_ENABLE` |
+| [Tone 音乐](src/README_TONE.md) | 11, 12 | 音调播放/停止 | `JM_APIS_ENABLE` |
+| [Pulse 脉冲检测](src/README_PULSE.md) | 13, 14 | 脉冲宽度测量 | `JM_APIS_ENABLE` |
+| [Shift 移位寄存器](src/README_SHIFT.md) | 15, 16 | 移位数据读写 | `JM_APIS_ENABLE` |
 | [Interrupt 中断控制](src/README_INTERRUPT.md) | 17, 18 | 全局中断使能/关闭 | `JM_STM32_INTERRUPT_ENABLE` |
 | [I2C 通用接口](src/README_I2C.md) | 45-53 | I2C 主从通信 | `JM_I2C_WRAPPER_ENABLE` |
 | [EEPROM 存储](src/README_EEPROM.md) | 54-59 | AT24CXX EEPROM 读写 | `JM_AT24CXX_ENABLE` |
@@ -296,7 +296,7 @@ jm_stm32 库通过串口代理协议支持 JS 环境（H5、微信小程序等�
 
 ```c
 // 在 jm_pcfg.h 中启用对应模块宏即可，无需额外初始化
-#define JM_TONE_ENABLE 1
+#define JM_APIS_ENABLE 1
 #define JM_I2C_WRAPPER_ENABLE 1
 #define JM_AT24CXX_ENABLE 1
 ```

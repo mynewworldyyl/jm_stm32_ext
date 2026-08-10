@@ -13,7 +13,7 @@
 在 `jm_pcfg.h` 中开启：
 
 ```c
-#define JM_TONE_ENABLE 1
+#define JM_APIS_ENABLE 1
 ```
 
 ### 2. 硬件连接

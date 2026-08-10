@@ -25,7 +25,7 @@
 #if JM_STM32_EVENT_ENABLE
 static void jm_stm32_runEvent(void);
 #endif
-static int jm_send_serial_packet(uint16_t subtype, uint16_t msg_id, const uint8_t *payload, uint16_t payload_len);
+int jm_send_serial_packet(uint16_t subtype, uint16_t msg_id, const uint8_t *payload, uint16_t payload_len);
 
 /**
  * @brief UART 接收环形缓冲区
@@ -71,254 +71,6 @@ static jm_rx_ring_t g_rx_ring;
 /** @brief 全局请求 ID 计数器（0 和 1 保留） */
 static uint8_t REQ_ID = 1;
 
-
-/* ===================== 引脚中断模块 ===================== */
-
-#if JM_STM32_INTERRUPT_ENABLE
-
-/** @brief 触发类型：上升沿 */
-#define JM_STM32_TRIGGER_RISING  1
-/** @brief 触发类型：下降沿 */
-#define JM_STM32_TRIGGER_FALLING 2
-/** @brief 触发类型：边沿变化 */
-#define JM_STM32_TRIGGER_CHANGE  3
-
-/** @brief 最大支持的引脚中断数量 */
-#define JM_STM32_MAX_PIN_INTERRUPTS 16
-
-/** @brief 按键去抖延时（毫秒） */
-#define JM_STM32_DEBOUNCE_MS    70
-
-/** @brief 引脚中断描述结构 */
-typedef struct {
-    uint16_t pin;              /**< 引脚编号 */
-    uint8_t triggerType;       /**< 触发类型 */
-    bool active;               /**< 是否激活 */
-    uint32_t last_irq_time;    /**< 上次中断时间（用于去抖） */
-} jm_pin_interrupt_t;
-
-static jm_pin_interrupt_t g_pinInterrupts[JM_STM32_MAX_PIN_INTERRUPTS] = {0};
-
-static GPIO_TypeDef *jm_stm32_gpioNo_to_port(uint32_t gpioNo) {
-    if (gpioNo < 16) return GPIOA;
-    else if (gpioNo < 32) return GPIOB;
-    return NULL;
-}
-
-static uint16_t jm_stm32_gpioNo_to_pin(uint32_t gpioNo) {
-    if (gpioNo < 16) return (uint16_t)(1 << gpioNo);
-    else if (gpioNo < 32) return (uint16_t)(1 << (gpioNo - 16));
-    return 0;
-}
-
-static bool jm_stm32_registerPinInterrupt(uint16_t gpioNo, uint8_t triggerType) {
-    if (gpioNo >= 32) return false;
-    GPIO_TypeDef *port = jm_stm32_gpioNo_to_port(gpioNo);
-    uint16_t pinMask = jm_stm32_gpioNo_to_pin(gpioNo);
-    uint8_t extiLine = (uint8_t)(gpioNo & 0x0F);
-    if (!port || !pinMask) return false;
-
-    RCC->APB2ENR |= RCC_APB2ENR_AFIOEN;
-
-    if (port == GPIOA) RCC->APB2ENR |= RCC_APB2ENR_IOPAEN;
-    else if (port == GPIOB) RCC->APB2ENR |= RCC_APB2ENR_IOPBEN;
-    else if (port == GPIOC) RCC->APB2ENR |= RCC_APB2ENR_IOPCEN;
-
-    uint32_t portSource = (port == GPIOA) ? 0 :
-                          (port == GPIOB) ? 1 :
-                          (port == GPIOC) ? 2 : 3;
-    uint32_t extiReg = extiLine / 4;
-    uint32_t extiShift = (extiLine % 4) * 4;
-    AFIO->EXTICR[extiReg] = (AFIO->EXTICR[extiReg] & ~(0xFUL << extiShift)) | (portSource << extiShift);
-
-    EXTI->IMR |= (1UL << extiLine);
-    if (triggerType == JM_STM32_TRIGGER_RISING) {
-        EXTI->RTSR |= (1UL << extiLine);
-        EXTI->FTSR &= ~(1UL << extiLine);
-    } else if (triggerType == JM_STM32_TRIGGER_FALLING) {
-        EXTI->RTSR &= ~(1UL << extiLine);
-        EXTI->FTSR |= (1UL << extiLine);
-    } else {
-        EXTI->RTSR |= (1UL << extiLine);
-        EXTI->FTSR |= (1UL << extiLine);
-    }
-
-    IRQn_Type irqn;
-    if (extiLine <= 4) {
-        irqn = (IRQn_Type)(EXTI0_IRQn + extiLine);
-    } else if (extiLine <= 9) {
-        irqn = EXTI9_5_IRQn;
-    } else {
-        irqn = EXTI15_10_IRQn;
-    }
-    NVIC_EnableIRQ(irqn);
-
-    for (int i = 0; i < JM_STM32_MAX_PIN_INTERRUPTS; i++) {
-        if (!g_pinInterrupts[i].active) {
-            g_pinInterrupts[i].pin = gpioNo;
-            g_pinInterrupts[i].triggerType = triggerType;
-            g_pinInterrupts[i].active = true;
-            break;
-        }
-    }
-
-    return true;
-}
-
-static bool jm_stm32_unregisterPinInterrupt(uint16_t gpioNo) {
-    if (gpioNo >= 32) return false;
-    uint8_t extiLine = (uint8_t)(gpioNo & 0x0F);
-
-    EXTI->IMR &= ~(1UL << extiLine);
-    EXTI->RTSR &= ~(1UL << extiLine);
-    EXTI->FTSR &= ~(1UL << extiLine);
-    EXTI->PR = (1UL << extiLine);
-
-    IRQn_Type irqn;
-    if (extiLine <= 4) {
-        irqn = (IRQn_Type)(EXTI0_IRQn + extiLine);
-    } else if (extiLine <= 9) {
-        irqn = EXTI9_5_IRQn;
-    } else {
-        irqn = EXTI15_10_IRQn;
-    }
-    NVIC_DisableIRQ(irqn);
-
-    for (int i = 0; i < JM_STM32_MAX_PIN_INTERRUPTS; i++) {
-        if (g_pinInterrupts[i].active && g_pinInterrupts[i].pin == gpioNo) {
-            g_pinInterrupts[i].active = false;
-            break;
-        }
-    }
-
-    return true;
-}
-
-//有引脚中断发送，将事件上行到网卡分发出去
-/**
- * @brief 上报引脚中断事件到 ESP8266
- * @param pin 引脚编号
- * @return true 成功
- */
-int jm_stm32_pinInterrupt(const uint16_t pin) {
-    jm_buf_t *hbuf = jm_buf_create(5);
-	if(hbuf == NULL) {
-		JM_LOG_E("InteMN");
-		return JM_ERR_NOT_READY;
-	}
- 	jm_buf_put_u16(hbuf, pin);
-
-	jm_send_serial_packet(JM_TASK_APP_PROXY_NETCARD_INTERRUPT, 0, (uint8_t*) hbuf->data, jm_buf_readable_len(hbuf));
-
-	jm_buf_release(hbuf);
-
-	JM_LOG_D("transInte E");
-	return true;	
-}
-
-void EXTI0_IRQHandler(void) {
-    if (EXTI->PR & (1UL << 0)) {
-        EXTI->PR = (1UL << 0);
-        uint32_t now = g_ctx.config->get_sys_time_ms();
-        for (int i = 0; i < JM_STM32_MAX_PIN_INTERRUPTS; i++) {
-            if (g_pinInterrupts[i].active && (g_pinInterrupts[i].pin & 0x0F) == 0) {
-                if (now - g_pinInterrupts[i].last_irq_time < JM_STM32_DEBOUNCE_MS) continue;
-                g_pinInterrupts[i].last_irq_time = now;
-                jm_stm32_pinInterrupt(g_pinInterrupts[i].pin);
-            }
-        }
-    }
-}
-
-void EXTI1_IRQHandler(void) {
-    if (EXTI->PR & (1UL << 1)) {
-        EXTI->PR = (1UL << 1);
-        uint32_t now = g_ctx.config->get_sys_time_ms();
-        for (int i = 0; i < JM_STM32_MAX_PIN_INTERRUPTS; i++) {
-            if (g_pinInterrupts[i].active && (g_pinInterrupts[i].pin & 0x0F) == 1) {
-                if (now - g_pinInterrupts[i].last_irq_time < JM_STM32_DEBOUNCE_MS) continue;
-                g_pinInterrupts[i].last_irq_time = now;
-                jm_stm32_pinInterrupt(g_pinInterrupts[i].pin);
-            }
-        }
-    }
-}
-
-void EXTI2_IRQHandler(void) {
-    if (EXTI->PR & (1UL << 2)) {
-        EXTI->PR = (1UL << 2);
-        uint32_t now = g_ctx.config->get_sys_time_ms();
-        for (int i = 0; i < JM_STM32_MAX_PIN_INTERRUPTS; i++) {
-            if (g_pinInterrupts[i].active && (g_pinInterrupts[i].pin & 0x0F) == 2) {
-                if (now - g_pinInterrupts[i].last_irq_time < JM_STM32_DEBOUNCE_MS) continue;
-                g_pinInterrupts[i].last_irq_time = now;
-                jm_stm32_pinInterrupt(g_pinInterrupts[i].pin);
-            }
-        }
-    }
-}
-
-void EXTI3_IRQHandler(void) {
-    if (EXTI->PR & (1UL << 3)) {
-        EXTI->PR = (1UL << 3);
-        uint32_t now = g_ctx.config->get_sys_time_ms();
-        for (int i = 0; i < JM_STM32_MAX_PIN_INTERRUPTS; i++) {
-            if (g_pinInterrupts[i].active && (g_pinInterrupts[i].pin & 0x0F) == 3) {
-                if (now - g_pinInterrupts[i].last_irq_time < JM_STM32_DEBOUNCE_MS) continue;
-                g_pinInterrupts[i].last_irq_time = now;
-                jm_stm32_pinInterrupt(g_pinInterrupts[i].pin);
-            }
-        }
-    }
-}
-
-void EXTI4_IRQHandler(void) {
-    if (EXTI->PR & (1UL << 4)) {
-        EXTI->PR = (1UL << 4);
-        uint32_t now = g_ctx.config->get_sys_time_ms();
-        for (int i = 0; i < JM_STM32_MAX_PIN_INTERRUPTS; i++) {
-            if (g_pinInterrupts[i].active && (g_pinInterrupts[i].pin & 0x0F) == 4) {
-                if (now - g_pinInterrupts[i].last_irq_time < JM_STM32_DEBOUNCE_MS) continue;
-                g_pinInterrupts[i].last_irq_time = now;
-                jm_stm32_pinInterrupt(g_pinInterrupts[i].pin);
-            }
-        }
-    }
-}
-
-void EXTI9_5_IRQHandler(void) {
-    uint32_t now = g_ctx.config->get_sys_time_ms();
-    for (int line = 5; line <= 9; line++) {
-        if (EXTI->PR & (1UL << line)) {
-            EXTI->PR = (1UL << line);
-            for (int i = 0; i < JM_STM32_MAX_PIN_INTERRUPTS; i++) {
-                if (g_pinInterrupts[i].active && (g_pinInterrupts[i].pin & 0x0F) == line) {
-                    if (now - g_pinInterrupts[i].last_irq_time < JM_STM32_DEBOUNCE_MS) continue;
-                    g_pinInterrupts[i].last_irq_time = now;
-                    jm_stm32_pinInterrupt(g_pinInterrupts[i].pin);
-                }
-            }
-        }
-    }
-}
-
-void EXTI15_10_IRQHandler(void) {
-    uint32_t now = g_ctx.config->get_sys_time_ms();
-    for (int line = 10; line <= 15; line++) {
-        if (EXTI->PR & (1UL << line)) {
-            EXTI->PR = (1UL << line);
-            for (int i = 0; i < JM_STM32_MAX_PIN_INTERRUPTS; i++) {
-                if (g_pinInterrupts[i].active && (g_pinInterrupts[i].pin & 0x0F) == line) {
-                    if (now - g_pinInterrupts[i].last_irq_time < JM_STM32_DEBOUNCE_MS) continue;
-                    g_pinInterrupts[i].last_irq_time = now;
-                    jm_stm32_pinInterrupt(g_pinInterrupts[i].pin);
-                }
-            }
-        }
-    }
-}
-
-#endif //JM_STM32_INTERRUPT_ENABLE
 
 /* ===================== 接收环形缓冲区 ===================== */
 
@@ -1269,8 +1021,48 @@ void jm_stm32_uart_rx_byte(uint8_t byte)
          } else if (payload_len >= 3 && payload[0] == 0 && payload[2] == JM_SDADA_CHECK_NUM) {
              uint8_t type = payload[3];
              uint8_t evt_type = 0;
-             if (type == JM_SERIALNET_TYPE_TCP) evt_type = JM_EVENT_TCP_DATA;
-             else if (type == JM_SERIALNET_TYPE_UDP || type == JM_SERIALNET_TYPE_UDP_COM) evt_type = JM_EVENT_UDP_DATA;
+           
+             if(false) {
+
+             }
+#if JM_STM32_TCP_ENABLE==1
+             else if (type == JM_SERIALNET_TYPE_TCP) {
+                //evt_type = JM_EVENT_TCP_DATA;
+                 jm_buf_t *buf = jm_buf_wrap_array(payload, payload_len);
+                 if (buf) {
+                    jm_onTcpEvent(JM_EVENT_TCP_DATA,buf);
+                    g_ctx.rx.assembling_buf = NULL;
+                    g_ctx.rx.data_size = 0;
+                    g_ctx.rx.recv_size = 0;
+                    g_ctx.rx.ds = 0;
+                    g_ctx.rx.req_id = 0;
+                    g_ctx.rx.wpos = 0;
+                    jm_buf_release(buf);
+                    return;
+                 }
+
+                 
+             }
+#endif //#if JM_STM32_TCP_ENABLE==1
+
+#if JM_STM32_UDP_ENABLE==1
+             else if (type == JM_SERIALNET_TYPE_UDP || type == JM_SERIALNET_TYPE_UDP_COM) {
+               // evt_type = JM_EVENT_UDP_DATA;
+                jm_buf_t *buf = jm_buf_wrap_array(payload, payload_len);
+                if (buf) {
+                    jm_onUdpData(buf);
+                    g_ctx.rx.assembling_buf = NULL;
+                    g_ctx.rx.data_size = 0;
+                    g_ctx.rx.recv_size = 0;
+                    g_ctx.rx.ds = 0;
+                    g_ctx.rx.req_id = 0;
+                    g_ctx.rx.wpos = 0;
+                    return;
+                }
+#endif //#if JM_STM32_UDP_ENABLE==1
+
+
+#if JM_MQTT_CLIENT_ENABLE
              else if (type == JM_SERIALNET_TYPE_MQTT) {
                  jm_mqtt_client_on_serial_data(payload + 4, payload_len - 4);
                  g_ctx.rx.assembling_buf = NULL;
@@ -1281,6 +1073,20 @@ void jm_stm32_uart_rx_byte(uint8_t byte)
                  g_ctx.rx.wpos = 0;
                  return;
              }
+#endif //JM_MQTT_CLIENT_ENABLE
+
+#if JM_HTTP_CLIENT_ENABLE
+             else if (type == JM_SERIALNET_TYPE_HTTP) {
+                 jm_http_client_on_serial_data(payload + 4, payload_len - 4);
+                 g_ctx.rx.assembling_buf = NULL;
+                 g_ctx.rx.data_size = 0;
+                 g_ctx.rx.recv_size = 0;
+                 g_ctx.rx.ds = 0;
+                 g_ctx.rx.req_id = 0;
+                 g_ctx.rx.wpos = 0;
+                 return;
+             }
+#endif //JM_HTTP_CLIENT_ENABLE
 
              JM_LOG_D("got type=%d evt_type=%d",type, evt_type);
 
@@ -1293,7 +1099,8 @@ void jm_stm32_uart_rx_byte(uint8_t byte)
                  }
              }
          } else {
-            JM_LOG_D("tcp data dl=%d",payload_len);
+
+            JM_LOG_D("NSP Type dl=%d",payload_len);
             jm_buf_t *buf = jm_buf_wrap_array(payload, payload_len);
             if (buf) {
                 JM_LOG_D("disp tcp data dl=%d",payload_len);
@@ -1436,7 +1243,7 @@ static jm_buf_t* jm_serial_buf(uint16_t subType, uint16_t msgId, uint16_t size) 
  * @param payload_len 负载长度
  * @return @ref JM_SUCCESS 成功，@ref JM_ERR_NOT_READY 未初始化
  */
-static int jm_send_serial_packet(uint16_t subtype, uint16_t msg_id, const uint8_t *payload, uint16_t payload_len)
+int jm_send_serial_packet(uint16_t subtype, uint16_t msg_id, const uint8_t *payload, uint16_t payload_len)
 {
     if (!g_ctx.initialized || !g_ctx.config->uart_send) {
         JM_LOG_E("SNI")
@@ -1704,7 +1511,7 @@ int jm_stm32_send_udp_data(const char *host, uint16_t port, const uint8_t *paylo
 
     uint8_t reqId = jm_stm32_next_req_id();
 
-    uint8_t data[3] = { PCK_HEANDER, byte0, byte1,reqId};
+    uint8_t data[] = { PCK_HEANDER, byte0, byte1, reqId};
 
     g_ctx.config->uart_send(data, sizeof(data));
 

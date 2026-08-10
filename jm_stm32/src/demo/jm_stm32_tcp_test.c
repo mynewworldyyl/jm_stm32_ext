@@ -112,7 +112,8 @@ static uint8_t button_read(void)
  * @param event_type 事件类型（@ref JM_EVENT_TCP_*）
  * @param data       事件数据（jm_tcp_conn_info_t 或 jm_buf_t）
  */
-void jm_tcp_test_on_event(uint8_t event_type, void *data)
+//void jm_tcp_test_on_event(uint8_t event_type, void *data)
+void jm_onTcpEvent(uint8_t event_type, void *data)
 {
     switch (event_type) {
     case JM_EVENT_TCP_CONNECTED: {

@@ -25,8 +25,6 @@ extern UART_HandleTypeDef huart2;
 
 static volatile uint32_t sys_tick_ms = 0;  /**< 系统毫秒计数器（寄存器直驱模式） */
 
-#if defined(USE_HAL_UART)
-
 /**
  * @brief HAL 模式下的系统时钟配置
  * @note 寄存器直驱模式下由 SystemClock_Config 实现
@@ -165,7 +163,7 @@ static void on_event(uint8_t event_type, uint16_t sub_type, void *data, void *us
     case JM_EVENT_TCP_SEND_RESULT:
     case JM_EVENT_TCP_ERROR:
     case JM_EVENT_TCP_DATA: {
-        jm_tcp_test_on_event(event_type, data);
+        jm_onTcpEvent(event_type, data);
         break;
     }
 #endif
@@ -175,7 +173,7 @@ static void on_event(uint8_t event_type, uint16_t sub_type, void *data, void *us
         //jm_buf_t *buf = (jm_buf_t *)data;
         //uint16_t n = jm_buf_readable_len(buf);
         //JM_LOG_D("EVT: udp data len=%u", n);
-        jm_udp_test_on_event(JM_EVENT_UDP_DATA, data);
+        jm_onUdpData(data);
         break;
     }
 #endif
@@ -266,9 +264,9 @@ int main(void)
 #endif
 
     jm_config_t cfg = {
-        .get_sys_time_ms = get_sys_time,
-        .uart_send      = uart_send,
-        .uart_send_log  = uart_send_log,
+        .get_sys_time_ms = get_sys_time, //毫秒为单位时间
+        .uart_send      = uart_send, //与8266网卡通信串口
+        .uart_send_log  = uart_send_log, //A2日志输出
         .event_cb       = on_event,
         .user_data      = NULL,
     };
@@ -281,9 +279,9 @@ int main(void)
 
     JM_LOG_LINE("jm_stm32 started");
 
-    uint32_t last_log = get_sys_time();
+    //uint32_t last_log = get_sys_time();
     while (1) {
-        uint32_t now = get_sys_time();
+        //uint32_t now = get_sys_time();
         //if(!now) JM_LOG_LINE("t %u", now);
         //if (now - last_log >= 2000) {
         //    last_log = now;
