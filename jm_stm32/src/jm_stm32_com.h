@@ -37,23 +37,6 @@ void jm_test_event_init(void);
 #endif //#if JM_STM32_TESTEVENT_ENABLE == 1
 /** =========================GPIO结束============================= */
 
-
-#if JM_STM32_UDP_ENABLE == 1
-/**
- * @brief UDP数据
- */
-void jm_onUdpData(jm_buf_t *buf );
-
-#endif //#if JM_STM32_UDP_ENABLE == 1
-
-
-#if JM_STM32_TCP_ENABLE == 1
-/**
- * @brief UDP数据
- */
-void jm_onTcpEvent(uint8_t eventType, void *data);
-#endif //#if JM_STM32_TCP_ENABLE == 1
-
 /** =========================TCP开始============================== */
 #if JM_STM32_TESTTCP_ENABLE
 

@@ -18,12 +18,48 @@
 
 #if defined(USE_HAL_UART)
 #include "stm32f1xx_hal.h"
+#include "stm32f1xx_hal.h"
 #include <stddef.h>
 extern UART_HandleTypeDef huart1;
 extern UART_HandleTypeDef huart2;
+#else
+#include <stm32f1xx.h>
 #endif
 
 static volatile uint32_t sys_tick_ms = 0;  /**< 系统毫秒计数器（寄存器直驱模式） */
+
+/* ===================== 延时函数 ===================== */
+
+/**
+ * @brief 微秒级软件延时（基于 SysTick）
+ *
+ * 使用 SysTick 定时器进行精确延时，延时期间阻塞。
+ * 注意：调用前需确保系统时钟为 72MHz。
+ *
+ * @param xus 延时时长（微秒），范围：0~233015
+ */
+void jm_delay_us(uint32_t xus)
+{
+	SysTick->LOAD = 72 * xus;				//设置定时器重装值
+	SysTick->VAL = 0x00;					//清空当前计数值
+	SysTick->CTRL = 0x00000005;				//设置时钟源为HCLK，启动定时器
+	while(!(SysTick->CTRL & 0x00010000));	//等待计数到0
+	SysTick->CTRL = 0x00000004;				//关闭定时器
+}
+
+/**
+ * @brief 毫秒级软件延时（基于 SysTick）
+ *
+ * 通过多次调用 @ref jm_delay_us 实现毫秒延时。
+ * @param xms 延时时长（毫秒），范围：0~4294967295
+ */
+void jm_delay_ms(uint32_t xms)
+{
+	while(xms--)
+	{
+		jm_delay_us(1000);
+	}
+}
 
 /**
  * @brief HAL 模式下的系统时钟配置
@@ -164,16 +200,6 @@ static void on_event(uint8_t event_type, uint16_t sub_type, void *data, void *us
     case JM_EVENT_TCP_ERROR:
     case JM_EVENT_TCP_DATA: {
         jm_onTcpEvent(event_type, data);
-        break;
-    }
-#endif
-
-#if JM_STM32_TESTUDP_ENABLE  
-    case JM_EVENT_UDP_DATA: {
-        //jm_buf_t *buf = (jm_buf_t *)data;
-        //uint16_t n = jm_buf_readable_len(buf);
-        //JM_LOG_D("EVT: udp data len=%u", n);
-        jm_onUdpData(data);
         break;
     }
 #endif

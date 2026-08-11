@@ -99,20 +99,13 @@ static uint8_t button_read(void)
  * @param event_type 事件类型（@ref JM_EVENT_UDP_DATA）
  * @param data       事件数据 (jm_buf_t*)
  */
-void jm_udp_test_on_event(uint8_t event_type, jm_buf_t *data)
+void jm_onUdpData(jm_buf_t *data)
 {
-    switch (event_type) {
-    case JM_EVENT_UDP_DATA: {
-        jm_buf_t *buf = (jm_buf_t *)data;
-        uint16_t n = jm_buf_readable_len(buf);
-        JM_LOG_D("UDP_TEST: data len=%u", n);
-        for (int i = 0; i < n; i++) {
-            jm_log_char((char)buf->data[buf->rpos + i]);
-        }
-        break;
-    }
-    default:
-        break;
+    jm_buf_t *buf = (jm_buf_t *)data;
+    uint16_t n = jm_buf_readable_len(buf);
+    JM_LOG_D("UDP_TEST: data len=%u", n);
+    for (int i = 0; i < n; i++) {
+        jm_log_char((char)buf->data[buf->rpos + i]);
     }
 }
 

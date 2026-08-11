@@ -352,6 +352,23 @@ typedef struct {
     jm_ctrl_fn_t fn;     /**< 命令处理函数 */
 } jm_ctrl_item_t;
 
+
+#if JM_STM32_UDP_ENABLE == 1
+/**
+ * @brief UDP数据
+ */
+__attribute__((weak)) void jm_onUdpData(jm_buf_t *buf );
+
+#endif //#if JM_STM32_UDP_ENABLE == 1
+
+
+#if JM_STM32_TCP_ENABLE == 1
+/**
+ * @brief UDP数据
+ */
+__attribute__((weak)) void jm_onTcpEvent(uint8_t eventType, void *data);
+#endif //#if JM_STM32_TCP_ENABLE == 1
+
 /* ===================== emap API ===================== */
 
 /**

@@ -13,12 +13,6 @@
 
 #include <string.h>
 
-#if defined(USE_HAL_UART)
-#include "stm32f1xx_hal.h"
-#else
-#include <stm32f1xx.h>
-#endif
-
 /** @brief UART 接收环形缓冲区大小 */
 #define JM_RX_RING_SIZE 256
 
@@ -101,8 +95,6 @@ static inline bool jm_rx_ring_pop(uint8_t *byte)
     g_rx_ring.tail = (g_rx_ring.tail + 1) % JM_RX_RING_SIZE;
     return true;
 }
-
-
 
 /**
  * @brief 释放动态分配的字符串指针
@@ -860,6 +852,8 @@ int jm_stm32_init(const jm_config_t *config)
 
     jm_comp_init(config);
 
+    jm_stm32_send_wifi_status_req();
+
     JM_LOG_LINE("init end");
 
     return JM_SUCCESS;
@@ -1071,6 +1065,7 @@ void jm_stm32_uart_rx_byte(uint8_t byte)
                          return;
                      }
                 }
+            }
 #endif //#if JM_STM32_UDP_ENABLE==1
 
 
@@ -1192,6 +1187,7 @@ jm_buf_t* jm_other_buf(uint8_t type, uint16_t size) {
  * @param payload_len 负载长度
  * @return @ref JM_SUCCESS 成功
  */
+/*
 static int jm_send_other_packet(uint8_t type, const uint8_t *payload, uint16_t payload_len)
 {
     if (!g_ctx.initialized || !g_ctx.config->uart_send) {
@@ -1229,6 +1225,7 @@ static int jm_send_other_packet(uint8_t type, const uint8_t *payload, uint16_t p
 
     return JM_SUCCESS;
 }
+*/
 
 /**
  * @brief 创建串口控制命令缓冲区
@@ -1415,6 +1412,8 @@ int jm_stm32_send_login(void)
     return jm_send_serial_packet(JM_TASK_APP_PROXY_LOGIN, 0, NULL, 0);
 }
 
+#if JM_STM32_TCP_ENABLE==1
+
 /**
  * @brief 发起 TCP 连接
  * @param host 目标主机名或 IP 地址
@@ -1498,6 +1497,11 @@ int jm_stm32_send_tcp_data(int8_t sock, const uint8_t *payload, uint16_t plen)
     return JM_SUCCESS;
 }
 
+#endif //#if JM_STM32_TCP_ENABLE==1
+
+
+#if JM_STM32_UDP_ENABLE==1
+
 /**
  * @brief 通过 UDP 发送数据
  * @param host  目标主机名或 IP 地址
@@ -1543,6 +1547,9 @@ int jm_stm32_send_udp_data(const char *host, uint16_t port, const uint8_t *paylo
 
     return JM_SUCCESS;
 }
+
+#endif //JM_STM32_UDP_ENABLE
+
 
 /**
  * @brief 发送语音播放文本
@@ -1660,39 +1667,6 @@ int jm_stm32_uart_send(const uint8_t *data, uint16_t len) {
     }
     g_ctx.config->uart_send(data, len);
     return JM_SUCCESS;
-}
-
-/* ===================== 延时函数 ===================== */
-
-/**
- * @brief 微秒级软件延时（基于 SysTick）
- *
- * 使用 SysTick 定时器进行精确延时，延时期间阻塞。
- * 注意：调用前需确保系统时钟为 72MHz。
- *
- * @param xus 延时时长（微秒），范围：0~233015
- */
-void jm_delay_us(uint32_t xus)
-{
-	SysTick->LOAD = 72 * xus;				//设置定时器重装值
-	SysTick->VAL = 0x00;					//清空当前计数值
-	SysTick->CTRL = 0x00000005;				//设置时钟源为HCLK，启动定时器
-	while(!(SysTick->CTRL & 0x00010000));	//等待计数到0
-	SysTick->CTRL = 0x00000004;				//关闭定时器
-}
-
-/**
- * @brief 毫秒级软件延时（基于 SysTick）
- *
- * 通过多次调用 @ref jm_delay_us 实现毫秒延时。
- * @param xms 延时时长（毫秒），范围：0~4294967295
- */
-void jm_delay_ms(uint32_t xms)
-{
-	while(xms--)
-	{
-		jm_delay_us(1000);
-	}
 }
 
 #if JM_STM32_EVENT_ENABLE
