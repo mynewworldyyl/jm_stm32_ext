@@ -63,6 +63,7 @@ typedef struct {
     const jm_config_t *config;  /**< 用户配置 */
     jm_rx_state_t rx;           /**< 接收状态机 */
     bool initialized;           /**< 初始化标志 */
+    bool wifi_enabled;          /**< WiFi 是否可用（由 ESP8266 上报） */
 } jm_ctx_t;
 
 static jm_ctx_t g_ctx;
@@ -587,6 +588,7 @@ static void jm_parse_serial_packet(const uint8_t *payload, uint16_t payload_len)
         jm_buf_get_u32(buf, &status.devId);
         jm_buf_get_bool(buf, &status.wifi_enabled);
         jm_buf_get_bool(buf, &status.isLogin);
+        g_ctx.wifi_enabled = status.wifi_enabled;
         jm_dispatch_event(JM_EVENT_WIFI_STATUS, subtype, &status);
         break;
     }
@@ -599,6 +601,7 @@ static void jm_parse_serial_packet(const uint8_t *payload, uint16_t payload_len)
         jm_buf_get_u32(buf, &status.devId);
         jm_buf_get_bool(buf, &status.wifi_enabled);
         jm_buf_get_bool(buf, &status.isLogin);
+        g_ctx.wifi_enabled = status.wifi_enabled;
         jm_dispatch_event(JM_EVENT_INTERNET_STATUS, subtype, &status);
         //JM_LOG_D("HB IE WIS we=%d lo=%d did=%d", status.wifi_enabled, status.isLogin, status.devId);
        
@@ -637,6 +640,8 @@ static void jm_parse_serial_packet(const uint8_t *payload, uint16_t payload_len)
         jm_dispatch_event(JM_EVENT_LOGIN_RESULT, subtype, &result);
         break;
     }
+
+#if JM_STM32_TCP_ENABLE==1
     case JM_TASK_APP_PROXY_TCP_CONNECTED:
     case JM_TASK_APP_PROXY_TCP_DISCONNECTED:
     case JM_TASK_APP_PROXY_TCP_SEND:
@@ -673,6 +678,9 @@ static void jm_parse_serial_packet(const uint8_t *payload, uint16_t payload_len)
         jm_dispatch_event(evt, subtype, &conn);
         break;
     }
+#endif //#if JM_STM32_TCP_ENABLE==1
+
+
     case JM_TASK_APP_PROXY_SYS_CFG: {
         JM_LOG_D("sysCfg");
         jm_sys_cfg_t cfg;
@@ -1005,8 +1013,8 @@ void jm_stm32_uart_rx_byte(uint8_t byte)
            // __DSB();  // Data Synchronization Barrier
            // __ISB();  // Instruction Synchronization Barrier
 
-        }else {
-            JM_LOG_D("noCfg %d",g_ctx.rx.req_id );
+        } else {
+            //JM_LOG_D("noCfg %d",g_ctx.rx.req_id );
         }
 
         //JM_LOG_D("oP %d",g_ctx.rx.req_id);
@@ -1022,70 +1030,82 @@ void jm_stm32_uart_rx_byte(uint8_t byte)
              uint8_t type = payload[3];
              uint8_t evt_type = 0;
            
-             if(false) {
-
-             }
+              if(false) ;
 #if JM_STM32_TCP_ENABLE==1
-             else if (type == JM_SERIALNET_TYPE_TCP) {
-                //evt_type = JM_EVENT_TCP_DATA;
-                 jm_buf_t *buf = jm_buf_wrap_array(payload, payload_len);
-                 if (buf) {
-                    jm_onTcpEvent(JM_EVENT_TCP_DATA,buf);
-                    g_ctx.rx.assembling_buf = NULL;
-                    g_ctx.rx.data_size = 0;
-                    g_ctx.rx.recv_size = 0;
-                    g_ctx.rx.ds = 0;
-                    g_ctx.rx.req_id = 0;
-                    g_ctx.rx.wpos = 0;
-                    jm_buf_release(buf);
-                    return;
+              else if (type == JM_SERIALNET_TYPE_TCP) {
+                 if (!g_ctx.wifi_enabled) {
+                     JM_LOG_D("tcp drop wifi not ready");
+                 } else {
+                     //evt_type = JM_EVENT_TCP_DATA;
+                      jm_buf_t *buf = jm_buf_wrap_array(payload, payload_len);
+                      if (buf) {
+                         jm_onTcpEvent(JM_EVENT_TCP_DATA,buf);
+                         g_ctx.rx.assembling_buf = NULL;
+                         g_ctx.rx.data_size = 0;
+                         g_ctx.rx.recv_size = 0;
+                         g_ctx.rx.ds = 0;
+                         g_ctx.rx.req_id = 0;
+                         g_ctx.rx.wpos = 0;
+                         jm_buf_release(buf);
+                         return;
+                      }
                  }
-
-                 
-             }
+              }
 #endif //#if JM_STM32_TCP_ENABLE==1
 
 #if JM_STM32_UDP_ENABLE==1
-             else if (type == JM_SERIALNET_TYPE_UDP || type == JM_SERIALNET_TYPE_UDP_COM) {
-               // evt_type = JM_EVENT_UDP_DATA;
-                jm_buf_t *buf = jm_buf_wrap_array(payload, payload_len);
-                if (buf) {
-                    jm_onUdpData(buf);
-                    g_ctx.rx.assembling_buf = NULL;
-                    g_ctx.rx.data_size = 0;
-                    g_ctx.rx.recv_size = 0;
-                    g_ctx.rx.ds = 0;
-                    g_ctx.rx.req_id = 0;
-                    g_ctx.rx.wpos = 0;
-                    return;
+              else if (type == JM_SERIALNET_TYPE_UDP || type == JM_SERIALNET_TYPE_UDP_COM) {
+                if (!g_ctx.wifi_enabled) {
+                     JM_LOG_D("udp drop wifi not ready");
+                } else {
+                // evt_type = JM_EVENT_UDP_DATA;
+                     jm_buf_t *buf = jm_buf_wrap_array(payload, payload_len);
+                     if (buf) {
+                         jm_onUdpData(buf);
+                         g_ctx.rx.assembling_buf = NULL;
+                         g_ctx.rx.data_size = 0;
+                         g_ctx.rx.recv_size = 0;
+                         g_ctx.rx.ds = 0;
+                         g_ctx.rx.req_id = 0;
+                         g_ctx.rx.wpos = 0;
+                         return;
+                     }
                 }
 #endif //#if JM_STM32_UDP_ENABLE==1
 
 
 #if JM_MQTT_CLIENT_ENABLE
-             else if (type == JM_SERIALNET_TYPE_MQTT) {
-                 jm_mqtt_client_on_serial_data(payload + 4, payload_len - 4);
-                 g_ctx.rx.assembling_buf = NULL;
-                 g_ctx.rx.data_size = 0;
-                 g_ctx.rx.recv_size = 0;
-                 g_ctx.rx.ds = 0;
-                 g_ctx.rx.req_id = 0;
-                 g_ctx.rx.wpos = 0;
-                 return;
-             }
+              else if (type == JM_SERIALNET_TYPE_MQTT) {
+                  if (!g_ctx.wifi_enabled) {
+                      JM_LOG_D("mqtt drop wifi not ready");
+                  } else {
+                      jm_mqtt_client_on_serial_data(payload + 4, payload_len - 4);
+                      g_ctx.rx.assembling_buf = NULL;
+                      g_ctx.rx.data_size = 0;
+                      g_ctx.rx.recv_size = 0;
+                      g_ctx.rx.ds = 0;
+                      g_ctx.rx.req_id = 0;
+                      g_ctx.rx.wpos = 0;
+                      return;
+                  }
+              }
 #endif //JM_MQTT_CLIENT_ENABLE
 
 #if JM_HTTP_CLIENT_ENABLE
-             else if (type == JM_SERIALNET_TYPE_HTTP) {
-                 jm_http_client_on_serial_data(payload + 4, payload_len - 4);
-                 g_ctx.rx.assembling_buf = NULL;
-                 g_ctx.rx.data_size = 0;
-                 g_ctx.rx.recv_size = 0;
-                 g_ctx.rx.ds = 0;
-                 g_ctx.rx.req_id = 0;
-                 g_ctx.rx.wpos = 0;
-                 return;
-             }
+              else if (type == JM_SERIALNET_TYPE_HTTP) {
+                  if (!g_ctx.wifi_enabled) {
+                      JM_LOG_D("http drop wifi not ready");
+                  } else {
+                      jm_http_client_on_serial_data(payload + 4, payload_len - 4);
+                      g_ctx.rx.assembling_buf = NULL;
+                      g_ctx.rx.data_size = 0;
+                      g_ctx.rx.recv_size = 0;
+                      g_ctx.rx.ds = 0;
+                      g_ctx.rx.req_id = 0;
+                      g_ctx.rx.wpos = 0;
+                      return;
+                  }
+              }
 #endif //JM_HTTP_CLIENT_ENABLE
 
              JM_LOG_D("got type=%d evt_type=%d",type, evt_type);
@@ -1614,7 +1634,11 @@ void jm_log_print(const char *format, ...)
     int len = vsnprintf(buf, sizeof(buf), format, args);
     va_end(args);
 
-    if (len <= 0 || len >= (int)sizeof(buf)) return;
+    if (len <= 0) return;
+
+    if (len >= (int)sizeof(buf)) {
+        len = sizeof(buf) - 1;
+    }
 
     if (g_ctx.config->uart_send_log) {
         g_ctx.config->uart_send_log((const uint8_t *)buf, (uint16_t)len);

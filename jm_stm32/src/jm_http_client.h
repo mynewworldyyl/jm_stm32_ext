@@ -46,20 +46,16 @@ extern "C" {
 
 /* ===================== 响应/事件类型 ===================== */
 
-/** @brief HTTP 响应 */
-#define JM_HTTP_CLIENT_RSP_RESPONSE    1
+/** @brief HTTP 响应长度包 */
+#define JM_HTTP_CLIENT_RSP_LENGTH      3
+/** @brief HTTP 响应数据包 */
+#define JM_HTTP_CLIENT_RSP_DATA        4
+/** @brief HTTP 响应结束包 */
+#define JM_HTTP_CLIENT_RSP_END         5
 /** @brief HTTP 错误事件 */
 #define JM_HTTP_CLIENT_EVT_ERROR       2
 
 /* ===================== 回调函数类型 ===================== */
-
-/**
- * @brief HTTP 响应回调
- * @param status_code HTTP 状态码
- * @param body 响应体数据
- * @param body_len 响应体长度
- */
-typedef void (*jm_http_client_response_cb)(uint16_t status_code, const uint8_t *body, uint16_t body_len);
 
 /**
  * @brief HTTP 错误回调
@@ -68,15 +64,28 @@ typedef void (*jm_http_client_response_cb)(uint16_t status_code, const uint8_t *
  */
 typedef void (*jm_http_client_error_cb)(int error_code, const char *error_msg);
 
+/**
+ * @brief HTTP 分片响应回调组
+ * 用于支持大包分片传输，应用层根据 payload 自行组包或处理
+ */
+typedef void (*jm_http_client_length_cb)(uint16_t status_code, uint32_t total_body_len);   /**< 长度包回调 */
+typedef void (*jm_http_client_data_cb)(uint8_t seq, uint8_t chunk_len, const uint8_t *data); /**< 数据包回调 */
+typedef void (*jm_http_client_end_cb)(uint16_t status_code);                                /**< 结束包回调 */
+
 /* ===================== API ===================== */
 
 /**
  * @brief 初始化 HTTP 客户端
- * @param response_cb 响应回调
  * @param error_cb 错误回调
+ * @param length_cb 分片长度包回调
+ * @param data_cb 分片数据包回调
+ * @param end_cb 分片结束包回调
  * @return JM_SUCCESS 成功
  */
-int jm_http_client_init(jm_http_client_response_cb response_cb, jm_http_client_error_cb error_cb);
+int jm_http_client_init( jm_http_client_data_cb data_cb,
+                        jm_http_client_error_cb error_cb,
+                        jm_http_client_length_cb length_cb,
+                        jm_http_client_end_cb end_cb);
 
 /**
  * @brief 发送 GET 请求

@@ -285,12 +285,12 @@ jm_stm32 库通过串口代理协议支持 JS 环境（H5、微信小程序等�
 
 | 模块 | OpCode | 说明 | 配置宏 |
 |------|--------|------|--------|
-| [Tone 音乐](src/README_TONE.md) | 11, 12 | 音调播放/停止 | `JM_APIS_ENABLE` |
-| [Pulse 脉冲检测](src/README_PULSE.md) | 13, 14 | 脉冲宽度测量 | `JM_APIS_ENABLE` |
-| [Shift 移位寄存器](src/README_SHIFT.md) | 15, 16 | 移位数据读写 | `JM_APIS_ENABLE` |
-| [Interrupt 中断控制](src/README_INTERRUPT.md) | 17, 18 | 全局中断使能/关闭 | `JM_STM32_INTERRUPT_ENABLE` |
-| [I2C 通用接口](src/README_I2C.md) | 45-53 | I2C 主从通信 | `JM_I2C_WRAPPER_ENABLE` |
-| [EEPROM 存储](src/README_EEPROM.md) | 54-59 | AT24CXX EEPROM 读写 | `JM_AT24CXX_ENABLE` |
+| [Tone 音乐](src/docs/README_TONE.md) | 11, 12 | 音调播放/停止 | `JM_APIS_ENABLE` |
+| [Pulse 脉冲检测](src/docs/README_PULSE.md) | 13, 14 | 脉冲宽度测量 | `JM_APIS_ENABLE` |
+| [Shift 移位寄存器](src/docs/README_SHIFT.md) | 15, 16 | 移位数据读写 | `JM_APIS_ENABLE` |
+| [Interrupt 中断控制](src/docs/README_INTERRUPT.md) | 17, 18 | 全局中断使能/关闭 | `JM_STM32_INTERRUPT_ENABLE` |
+| [I2C 通用接口](src/docs/README_I2C.md) | 45-53 | I2C 主从通信 | `JM_I2C_WRAPPER_ENABLE` |
+| [EEPROM 存储](src/docs/README_EEPROM.md) | 54-59 | AT24CXX EEPROM 读写 | `JM_AT24CXX_ENABLE` |
 
 ### 快速上手 JS API
 
@@ -301,19 +301,19 @@ jm_stm32 库通过串口代理协议支持 JS 环境（H5、微信小程序等�
 #define JM_AT24CXX_ENABLE 1
 ```
 
-详见 [JS API 开发指南](src/README_JS_API.md)。
+详见 [JS API 开发指南](src/docs/README_JS_API.md)。
 
 ## 示例模块 (Demo)
 
-本库 `src/demo/` 目录下提供了功能测试示例，每个示例对应一个功能模块，
+本库 `src/docs/` 目录下提供了功能测试示例，每个示例对应一个功能模块，
 并附带详细的集成步骤和 API 参考：
 
 | 模块 | 说明 | 配置宏 |
 |------|------|--------|
-| [TCP 连接测试](src/demo/README_TCP.md) | TCP 连接、发送、接收测试 | `JM_STM32_TESTTCP_ENABLE` |
-| [UDP 通信测试](src/demo/README_UDP.md) | UDP 数据发送、接收测试 | `JM_STM32_TESTUDP_ENABLE` |
-| [事件系统测试](src/demo/README_EVENT.md) | 异步事件监听与分发 | `JM_STM32_TESTEVENT_ENABLE` |
-| [MQTT 客户端测试](src/demo/README_MQTT_CLIENT.md) | MQTT 连接、发布、订阅 | `JM_MQTT_CLIENT_TEST_ENABLE` |
+| [TCP 连接测试](src/docs/README_TCP.md) | TCP 连接、发送、接收测试 | `JM_STM32_TESTTCP_ENABLE` |
+| [UDP 通信测试](src/docs/README_UDP.md) | UDP 数据发送、接收测试 | `JM_STM32_TESTUDP_ENABLE` |
+| [事件系统测试](src/docs/README_EVENT.md) | 异步事件监听与分发 | `JM_STM32_TESTEVENT_ENABLE` |
+| [MQTT 客户端测试](src/docs/README_MQTT_CLIENT.md) | MQTT 连接、发布、订阅 | `JM_MQTT_CLIENT_TEST_ENABLE` |
 
 ### 快速集成示例模块
 

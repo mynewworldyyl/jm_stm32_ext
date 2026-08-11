@@ -36,8 +36,10 @@
 #if JM_HTTP_CLIENT_TEST_ENABLE && JM_HTTP_CLIENT_ENABLE
 
 //#define HTTP_TEST_URL         "https://47.107.141.158/firmw/updater.info"
-#define HTTP_TEST_URL         "https://jmicro.cn/firmw/test.txt"
-//#define HTTP_TEST_URL           "http://192.168.3.10:9090/testHttpSrv?a=123&t=tssfsa"
+//#define HTTP_TEST_URL         "https://jmicro.cn/firmw/test.txt"
+#define HTTP_TEST_URL           "https://jmicro.cn/_http_/testHttpSrv?a=123&t=tssfsa"
+
+//#define HTTP_TEST_URL           "https://jmicro.cn/"
 #define HTTP_TEST_BTN_PIN     0               /**< 按键引脚编号 (PA0)http://192.168.3.10:8888/update/test.txt */
 #define BTN_DEBOUNCE_MS       100              /**< 按键去抖时间（ms） */
 
@@ -82,33 +84,44 @@ static uint8_t button_read(void)
 /* ===================== HTTP 回调函数 ===================== */
 
 /**
- * @brief HTTP 响应回调
- * @param status_code HTTP 状态码
- * @param body 响应体数据
- * @param body_len 响应体长度
+ * @brief HTTP 错误回调
  */
-static void http_client_response_callback(uint16_t status_code, const uint8_t *body, uint16_t body_len) {
-    JM_LOG_D("HTTP client: status=%d, body_len=%d body_is_null=%d", status_code, body_len, body == NULL);
-    if (body_len > 0 && body != NULL) {
-        uint16_t print_len = body_len;
-        if (print_len > 64) print_len = 64;
-        char hexBuf[192];
-        char *p = hexBuf;
-        for (uint16_t i = 0; i < print_len && p < hexBuf + sizeof(hexBuf) - 3; i++) {
-            p += sprintf(p, "%02X ", body[i]);
+static void http_client_error_callback(int error_code, const char *error_msg) {
+    JM_LOG_E("HTTP err: code=%d msg=%s", error_code, error_msg ? error_msg : "null");
+}
+
+/**
+ * @brief 分片长度包回调 — 直接日志输出，不缓存
+ */
+static void http_client_length_callback(uint16_t status_code, uint32_t total_body_len) {
+    JM_LOG_D("HTTP LENGTH: status=%u total_len=%u", status_code, total_body_len);
+}
+
+/**
+ * @brief 分片数据包回调 — 直接日志输出，不缓存
+ * @param seq 分片序号
+ * @param chunk_len 本分片数据长度
+ * @param data 分片数据指针
+ */
+static void http_client_data_callback(uint8_t seq, uint8_t chunk_len, const uint8_t *data) {
+    //JM_LOG_D("HTTP DATA: seq=%u chunk=%u", seq, chunk_len);
+    if (chunk_len > 0 && data) {
+        const uint16_t LINE = 64;
+        uint16_t offset = 0;
+        while (offset < chunk_len) {
+            uint16_t part = (chunk_len - offset > LINE) ? LINE : (chunk_len - offset);
+           // JM_LOG_D("  text%u: %.*s", offset, part, (const char*)data + offset);
+             JM_LOG_D(" %.*s",(const char*)data + offset);
+            offset += part;
         }
-        JM_LOG_D("HTTP body hex: %s", hexBuf);
-        JM_LOG_D("HTTP body str: %.*s", print_len, body);
     }
 }
 
 /**
- * @brief HTTP 错误回调
- * @param error_code 错误码
- * @param error_msg 错误描述
+ * @brief 分片结束包回调 — 直接日志输出，不缓存
  */
-static void http_client_error_callback(int error_code, const char *error_msg) {
-    JM_LOG_E("HTTP client: error=%d, msg=%s", error_code, error_msg ? error_msg : "unknown");
+static void http_client_end_callback(uint16_t status_code) {
+    JM_LOG_D("HTTP END: status=%u", status_code);
 }
 
 /* ===================== 公共 API ===================== */
@@ -124,8 +137,10 @@ static void http_client_error_callback(int error_code, const char *error_msg) {
 void jm_http_client_test_init(const jm_config_t *config) {
     (void)config;
 
-    jm_http_client_init(http_client_response_callback,
-                        http_client_error_callback);
+    jm_http_client_init(http_client_data_callback,
+                        http_client_error_callback,
+                        http_client_length_callback,
+                        http_client_end_callback);
 
     button_init();
 

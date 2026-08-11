@@ -15,8 +15,10 @@
 
 /* ===================== 全局状态 ===================== */
 
-static jm_http_client_response_cb g_response_cb = NULL;
 static jm_http_client_error_cb g_error_cb = NULL;
+static jm_http_client_length_cb g_length_cb = NULL;
+static jm_http_client_data_cb g_data_cb = NULL;
+static jm_http_client_end_cb g_end_cb = NULL;
 
 static bool g_initialized = false;
 static bool g_waiting_response = false;
@@ -89,10 +91,15 @@ static int jm_http_client_request(uint8_t cmd, const char *url, const char *head
 
 /* ===================== 公共 API ===================== */
 
-int jm_http_client_init(jm_http_client_response_cb response_cb, jm_http_client_error_cb error_cb)
+int jm_http_client_init(jm_http_client_data_cb data_cb,
+                        jm_http_client_error_cb error_cb,
+                        jm_http_client_length_cb length_cb,
+                        jm_http_client_end_cb end_cb)
 {
-    g_response_cb = response_cb;
     g_error_cb = error_cb;
+    g_length_cb = length_cb;
+    g_data_cb = data_cb;
+    g_end_cb = end_cb;
     g_initialized = true;
     g_waiting_response = false;
     g_rx_len = 0;
@@ -146,26 +153,43 @@ void jm_http_client_on_serial_data(const uint8_t *data, uint16_t len)
 {
     if (!g_initialized || len < 2) return;
 
+    g_response_start_time = jm_stm32_get_time();
+
     uint8_t cmd = data[0];
     const uint8_t *payload = data + 1;
     uint16_t payload_len = len - 1;
 
     switch (cmd) {
-        case JM_HTTP_CLIENT_RSP_RESPONSE: {
-            if (payload_len < 4) break;
-
+        case JM_HTTP_CLIENT_RSP_LENGTH: {
+            if (payload_len < 6) break;
             uint16_t status_code = (payload[0] << 8) | payload[1];
-            uint16_t body_len = (payload[2] << 8) | payload[3];
-            const uint8_t *body = NULL;
-            if (body_len > 0 && 4 + body_len <= payload_len) {
-                body = payload + 4;
+            uint32_t total_body_len = ((uint32_t)payload[2] << 24) | ((uint32_t)payload[3] << 16) | ((uint32_t)payload[4] << 8) | payload[5];
+            //JM_LOG_D("HTTP length: status=%u total_len=%u", status_code, total_body_len);
+            if (g_length_cb) {
+                g_length_cb(status_code, total_body_len);
             }
-            JM_LOG_D("HTTP parse: status=%u body_len=%u payload_len=%u body_ptr=%p", status_code, body_len, payload_len, body);
+            break;
+        }
 
+        case JM_HTTP_CLIENT_RSP_DATA: {
+            if (payload_len < 2) break;
+            uint8_t seq = payload[0];
+            uint8_t chunk_len = payload[1];
+            if (chunk_len == 0 || chunk_len > payload_len - 2) break;
+            //JM_LOG_D("HTTP data: seq=%u chunk=%u", seq, chunk_len);
+            if (g_data_cb) {
+                g_data_cb(seq, chunk_len, payload + 2);
+            }
+            break;
+        }
+
+        case JM_HTTP_CLIENT_RSP_END: {
+            if (payload_len < 2) break;
+            uint16_t status_code = (payload[0] << 8) | payload[1];
             g_waiting_response = false;
-
-            if (g_response_cb) {
-                g_response_cb(status_code, body, body_len);
+            //JM_LOG_D("HTTP end: status=%u", status_code);
+            if (g_end_cb) {
+                g_end_cb(status_code);
             }
             break;
         }

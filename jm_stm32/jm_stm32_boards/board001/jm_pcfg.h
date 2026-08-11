@@ -39,14 +39,14 @@
 /** @brief 简化 MQTT 客户端开关 */
 #define JM_MQTT_CLIENT_ENABLE 0
 
-/** @brief 简化 HTTP 客户端开关 */
-#define JM_HTTP_CLIENT_ENABLE 1
-
 /** @brief TCP开关 */
 #define JM_STM32_TCP_ENABLE 0
 
 /** @brief UDP开关 */
 #define JM_STM32_UDP_ENABLE 0
+
+/** @brief 简化 HTTP 客户端开关 */
+#define JM_HTTP_CLIENT_ENABLE 1
 
 /* ===================== 测试模块 ===================== */
 
