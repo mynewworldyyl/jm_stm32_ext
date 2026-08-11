@@ -13,6 +13,10 @@
 
 #include <string.h>
 
+#if defined(USE_HAL_UART)
+#include "stm32f1xx_hal.h"
+#endif
+
 /** @brief UART 接收环形缓冲区大小 */
 #define JM_RX_RING_SIZE 256
 
@@ -848,11 +852,23 @@ int jm_stm32_init(const jm_config_t *config)
     g_ctx.config = config;
     g_ctx.initialized = true;
 
-    JM_LOG_LINE("init stm32");
+    jm_log_char('i'); jm_log_char('n'); jm_log_char('i'); jm_log_char('t'); jm_log_char(' '); jm_log_char('s'); jm_log_char('t'); jm_log_char('m'); jm_log_char('3'); jm_log_char('2'); jm_log_char('\n');
 
+    if (g_ctx.config->uart_send_log) {
+        g_ctx.config->uart_send_log((const uint8_t*)"log_test_ok\r\n", 14);
+    }
+
+    if (g_ctx.config->uart_send_log) {
+        g_ctx.config->uart_send_log((const uint8_t*)"after_log_test\r\n", 16);
+    }
+
+    jm_log_char('b'); jm_log_char('e'); jm_log_char('f'); jm_log_char('o'); jm_log_char('r'); jm_log_char('e'); jm_log_char(' '); jm_log_char('c'); jm_log_char('o'); jm_log_char('m'); jm_log_char('p'); jm_log_char('_'); jm_log_char('i'); jm_log_char('n'); jm_log_char('i'); jm_log_char('t'); jm_log_char('\n');
     jm_comp_init(config);
+    JM_LOG_LINE("after comp_init");
 
+    JM_LOG_LINE("before wifi_req");
     jm_stm32_send_wifi_status_req();
+    JM_LOG_LINE("after wifi_req");
 
     JM_LOG_LINE("init end");
 
@@ -1018,7 +1034,7 @@ void jm_stm32_uart_rx_byte(uint8_t byte)
         const uint8_t *payload = jm_buf_read_buf(g_ctx.rx.assembling_buf);
 
          if (payload_len >= 8 && payload[0] == 0 && payload[1] == 0 && payload[2] == JM_SDADA_CHECK_NUM && payload[3] == JM_SERIALNET_TYPE_SERIAL) {
-             //JM_LOG_D("JM_SERIALNET_TYPE_SERIAL %d",payload[3]);
+             JM_LOG_D("seCmd %d",payload[3]);
              jm_parse_serial_packet(payload, payload_len);
          } else if (payload_len >= 3 && payload[0] == 0 && payload[2] == JM_SDADA_CHECK_NUM) {
              uint8_t type = payload[3];
@@ -1572,35 +1588,6 @@ int jm_stm32_send_ctrl_event(const uint8_t *data, uint16_t len)
 {
     if (!data || len == 0) return JM_ERR_INVALID_PACKET;
     return jm_send_serial_packet(JM_TASK_APP_PROXY_CTRL_EVENT, 0, data, len);
-}
-
-/**
- * @brief HAL 模式下轮询读取 UART 数据
- *
- * 从 HAL UART 硬件 FIFO 中读取所有已接收的字节并推入环形缓冲区。
- * 仅当定义了 `USE_HAL_UART` 时有效。
- *
- * @param huart HAL UART 句柄指针
- * @return 0 成功，-1 失败
- */
-int jm_serial_read(void *huart)
-{
-#if defined(USE_HAL_UART)
-    if (!huart || !g_ctx.initialized) return -1;
-
-    UART_HandleTypeDef *uart = (UART_HandleTypeDef *)huart;
-    uint8_t byte;
-    uint32_t flag = __HAL_UART_GET_FLAG(uart, UART_FLAG_RXNE);
-    while (flag != RESET) {
-        byte = (uint8_t)(uart->Instance->DR & 0xFF);
-        jm_rx_ring_push(byte);
-        flag = __HAL_UART_GET_FLAG(uart, UART_FLAG_RXNE);
-    }
-    return 0;
-#else
-    (void)huart;
-    return -1;
-#endif
 }
 
 

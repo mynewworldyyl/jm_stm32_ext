@@ -72,6 +72,14 @@ static uint32_t get_sys_time(void)
 }
 
 /**
+ * @brief HAL 模式下的 SysTick 中断处理
+ */
+void SysTick_Handler(void)
+{
+    HAL_IncTick();
+}
+
+/**
  * @brief HAL 模式下通过 UART 发送数据
  */
 static void uart_send(const uint8_t *data, uint16_t len)
@@ -209,6 +217,33 @@ static void on_event(uint8_t event_type, uint16_t sub_type, void *data, void *us
         JM_LOG_D("NSPE: event_type=%d sub_type=%d",event_type, sub_type);
         break;
     }
+}
+
+/**
+ * @brief HAL 模式下轮询读取 UART 数据
+ *
+ * 从 HAL UART 硬件 FIFO 中读取所有已接收的字节并推入环形缓冲区。
+ * 仅当定义了 `USE_HAL_UART` 时有效。
+ *
+ * @param huart HAL UART 句柄指针
+ * @return 0 成功，-1 失败
+ */
+int jm_serial_read(void *huart)
+{
+#if defined(USE_HAL_UART)
+    UART_HandleTypeDef *uart = (UART_HandleTypeDef *)huart;
+    uint8_t byte;
+    uint32_t flag = __HAL_UART_GET_FLAG(uart, UART_FLAG_RXNE);
+    while (flag != RESET) {
+        byte = (uint8_t)(uart->Instance->DR & 0xFF);
+        jm_stm32_uart_push_byte(byte);
+        flag = __HAL_UART_GET_FLAG(uart, UART_FLAG_RXNE);
+    }
+    return 0;
+#else
+    (void)huart;
+    return -1;
+#endif
 }
 
 /**

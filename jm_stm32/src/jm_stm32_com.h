@@ -151,8 +151,14 @@ void jm_mqtt_client_test_loop(void);
 
 /** =========================MQTT结束============================== */
 
+#if JM_STM32_TESTOLED_ENABLE==1 && JM_OLED_ENABLE==1
+void jm_oled_test_init(void);
+void jm_oled_test_loop(void);
+#endif //#if JM_STM32_TESTOLED_ENABLE==1
 
-
+#if JM_OLED_ENABLE==1
+void jm_oled_ctrl_init(void);
+#endif //#if JM_OLED_ENABLE==1
 
 #ifdef __cplusplus
 }
