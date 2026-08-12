@@ -318,6 +318,9 @@ int main(void)
 {
     SystemClock_Config();
     SysTick_Config(72000);
+
+    RCC->APB2ENR |= RCC_APB2ENR_IOPBEN;  // GPIOB时钟（OLED用）
+    
     uart_init();
 
 #if JM_LOG_DEBUG_ENABLE || JM_LOG_ERROR_ENABLE

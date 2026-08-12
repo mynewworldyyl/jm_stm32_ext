@@ -25,7 +25,7 @@
 #endif
 
 #if JM_OLED_ENABLE
-#include "oled/OLED.h"
+#include "oled/fm_api_oled.h"
 #endif
 
 
@@ -74,7 +74,7 @@ void jm_comp_init(const jm_config_t *config) {
     JM_LOG_LINE("oled_ctrl_init");
     jm_oled_ctrl_init();
     JM_LOG_LINE("oled_init");
-    OLED_Init();//OLED初始化
+    fm_api_oled_init();
     JM_LOG_LINE("oled_init_done");
 #endif
 

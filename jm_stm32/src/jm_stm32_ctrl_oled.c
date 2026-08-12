@@ -8,9 +8,58 @@
 
 #include "jm_stm32.h"
 #include "jm_stm32_com.h"
-#include "oled/OLED.h"
+#include "oled/fm_api_oled.h"
 
 #if JM_OLED_ENABLE == 1
+
+static void dec_to_str(uint32_t n, char *buf, int len) {
+    char tmp[12];
+    int i = 0;
+    if (n == 0) {
+        tmp[i++] = '0';
+    } else {
+        uint32_t t = n;
+        while (t > 0) {
+            tmp[i++] = '0' + (t % 10);
+            t /= 10;
+        }
+    }
+    int j;
+    int pad = len - i;
+    if (pad < 0) pad = 0;
+    for (j = 0; j < pad; j++) buf[j] = ' ';
+    for (j = 0; j < i; j++) buf[pad + j] = tmp[i - 1 - j];
+    buf[len] = '\0';
+}
+
+static void signed_dec_to_str(int32_t n, char *buf, int len) {
+    if (n < 0) {
+        buf[0] = '-';
+        n = -n;
+        dec_to_str((uint32_t)n, buf + 1, len - 1);
+    } else {
+        dec_to_str((uint32_t)n, buf, len);
+    }
+}
+
+static void hex_to_str(uint32_t n, char *buf, int len) {
+    const char *hex = "0123456789ABCDEF";
+    int i;
+    for (i = len - 1; i >= 0; i--) {
+        buf[i] = hex[n & 0xF];
+        n >>= 4;
+    }
+    buf[len] = '\0';
+}
+
+static void bin_to_str(uint32_t n, char *buf, int len) {
+    int i;
+    for (i = len - 1; i >= 0; i--) {
+        buf[i] = (n & 1) ? '1' : '0';
+        n >>= 1;
+    }
+    buf[len] = '\0';
+}
 
 /**
  * @brief OLED 控制处理函数
@@ -32,12 +81,12 @@ jm_emap_t *ctrl_remote_ctrlOled(jm_emap_t *ps) {
 
     switch (op) {
         case 1: {
-            OLED_Init();
+            fm_api_oled_init();
             jm_emap_putInt(h, "status", 1, false);
             break;
         }
         case 2: {
-            OLED_Clear();
+            fm_api_oled_clear();
             jm_emap_putInt(h, "status", 1, false);
             break;
         }
@@ -45,7 +94,8 @@ jm_emap_t *ctrl_remote_ctrlOled(jm_emap_t *ps) {
             uint8_t line = (uint8_t)jm_emap_getInt(ps, "l", 1);
             uint8_t col = (uint8_t)jm_emap_getInt(ps, "c", 1);
             char ch = (char)jm_emap_getInt(ps, "ch", 0);
-            OLED_ShowChar(line, col, ch);
+            char str[2] = {ch, '\0'};
+            fm_api_oled_write(str, 2, col, line, FONT_7_X_10_PIXELS);
             jm_emap_putInt(h, "status", 1, false);
             break;
         }
@@ -55,7 +105,8 @@ jm_emap_t *ctrl_remote_ctrlOled(jm_emap_t *ps) {
             char *s = jm_emap_getStr(ps, "s");
             JM_LOG_D("l=%d c=%d s=%s",line, col, s);
             if (s) {
-                OLED_ShowString(line, col, s);
+                int slen = strlen(s);
+                fm_api_oled_write(s, slen + 1, col, line, FONT_7_X_10_PIXELS);
                 jm_emap_putInt(h, "status", 1, false);
             } else {
                 jm_emap_putInt(h, "code", 1, false);
@@ -68,7 +119,9 @@ jm_emap_t *ctrl_remote_ctrlOled(jm_emap_t *ps) {
             uint8_t col = (uint8_t)jm_emap_getInt(ps, "c", 1);
             uint32_t n = (uint32_t)jm_emap_getInt(ps, "n", 0);
             uint8_t len = (uint8_t)jm_emap_getInt(ps, "len", 1);
-            OLED_ShowNum(line, col, n, len);
+            char buf[12];
+            dec_to_str(n, buf, len);
+            fm_api_oled_write(buf, len + 1, col, line, FONT_7_X_10_PIXELS);
             jm_emap_putInt(h, "status", 1, false);
             break;
         }
@@ -77,7 +130,9 @@ jm_emap_t *ctrl_remote_ctrlOled(jm_emap_t *ps) {
             uint8_t col = (uint8_t)jm_emap_getInt(ps, "c", 1);
             int32_t n = (int32_t)jm_emap_getInt(ps, "n", 0);
             uint8_t len = (uint8_t)jm_emap_getInt(ps, "len", 1);
-            OLED_ShowSignedNum(line, col, n, len);
+            char buf[12];
+            signed_dec_to_str(n, buf, len);
+            fm_api_oled_write(buf, len + 1, col, line, FONT_7_X_10_PIXELS);
             jm_emap_putInt(h, "status", 1, false);
             break;
         }
@@ -86,7 +141,9 @@ jm_emap_t *ctrl_remote_ctrlOled(jm_emap_t *ps) {
             uint8_t col = (uint8_t)jm_emap_getInt(ps, "c", 1);
             uint32_t n = (uint32_t)jm_emap_getInt(ps, "n", 0);
             uint8_t len = (uint8_t)jm_emap_getInt(ps, "len", 1);
-            OLED_ShowHexNum(line, col, n, len);
+            char buf[12];
+            hex_to_str(n, buf, len);
+            fm_api_oled_write(buf, len + 1, col, line, FONT_7_X_10_PIXELS);
             jm_emap_putInt(h, "status", 1, false);
             break;
         }
@@ -95,7 +152,9 @@ jm_emap_t *ctrl_remote_ctrlOled(jm_emap_t *ps) {
             uint8_t col = (uint8_t)jm_emap_getInt(ps, "c", 1);
             uint32_t n = (uint32_t)jm_emap_getInt(ps, "n", 0);
             uint8_t len = (uint8_t)jm_emap_getInt(ps, "len", 1);
-            OLED_ShowBinNum(line, col, n, len);
+            char buf[12];
+            bin_to_str(n, buf, len);
+            fm_api_oled_write(buf, len + 1, col, line, FONT_7_X_10_PIXELS);
             jm_emap_putInt(h, "status", 1, false);
             break;
         }

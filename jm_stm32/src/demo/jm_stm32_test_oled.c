@@ -1,9 +1,9 @@
 /**
- * @file jm_stm32_oled_test.c
+ * @file jm_stm32_test_oled.c
  * @brief OLED 显示屏测试/示例模块
  *
- * 本模块演示如何使用 jm_stm32 的 OLED 显示屏功能。
- * 通过调用 OLED 显示函数，可以在 OLED 屏幕上显示文字、数字等内容。
+ * 本模块演示如何使用 jm_stm32 的 OLED 显示屏功能（基于 fm_api_oled）。
+ * 通过调用 fm_api_oled 函数，可以在 OLED 屏幕上显示文字等内容。
  *
  * @section 集成步骤
  * 1. 在 `jm_pcfg.h` 中启用 OLED 模块及本测试模块：
@@ -23,7 +23,7 @@
  */
 
 #include "jm_stm32.h"
-#include "oled/OLED.h"
+#include "oled/fm_api_oled.h"
 
 #if defined(USE_HAL_UART)
 #include "stm32f1xx_hal.h"
@@ -39,9 +39,12 @@
  */
 void jm_oled_test_init(void) {
     JM_LOG_D("jm_oled_test_init")
-    OLED_Init();
-    OLED_Clear();
-    OLED_ShowString(1, 1, "JMicrov");
+    fm_api_oled_init();
+    JM_LOG_D("oled1");
+    fm_api_oled_clear();
+    JM_LOG_D("oled2");
+    fm_api_oled_write("JMicrov", 7, 1, 1, FONT_7_X_10_PIXELS);
+    JM_LOG_D("oled3");
 }
 
 /**
@@ -51,11 +54,12 @@ void jm_oled_test_init(void) {
  * 当前保持显示不变，可按需扩展动态内容。
  */
 void jm_oled_test_loop(void) {
-   
+
     static uint32_t cnt = 0;
-    if (++cnt >= 500) {
+    if (++cnt >= 50000) {
+        //JM_LOG_D("oled4");
         cnt = 0;
-        OLED_ShowString(1, 1, "JMicrov");
+        fm_api_oled_write("JMicrov", 7, 1, 1, FONT_7_X_10_PIXELS);
         //HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);
     }
     
