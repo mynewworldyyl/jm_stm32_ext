@@ -55,13 +55,13 @@ void jm_oled_test_init(void) {
  */
 void jm_oled_test_loop(void) {
 
-    static uint32_t cnt = 0;
-    if (++cnt >= 50000) {
+   // static uint32_t cnt = 0;
+   // if (++cnt >= 50000) {
         //JM_LOG_D("oled4");
-        cnt = 0;
-        fm_api_oled_write("JMicrov", 7, 1, 1, FONT_7_X_10_PIXELS);
+      //  cnt = 0;
+        //fm_api_oled_write("JMicrov", 7, 1, 1, FONT_7_X_10_PIXELS);
         //HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);
-    }
+   // }
     
 }
 

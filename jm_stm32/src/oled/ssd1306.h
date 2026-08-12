@@ -221,6 +221,7 @@ void SSD1306_DrawCircle(int16_t x0, int16_t y0, int16_t r, SSD1306_COLOR_t c);
  */
 void SSD1306_DrawFilledCircle(int16_t x0, int16_t y0, int16_t r, SSD1306_COLOR_t c);
 
+void SSD1306_DrawFilledTriangle(uint16_t x1, uint16_t y1, uint16_t x2, uint16_t y2, uint16_t x3, uint16_t y3, SSD1306_COLOR_t color);
 
 
 #ifndef ssd1306_I2C_TIMEOUT
@@ -299,6 +300,34 @@ void SSD1306_InvertDisplay (int i);
 
 void SSD1306_Clear (void);
 
+void SSD1306_ON(void);
+void SSD1306_OFF(void);
+
+/**
+ * @brief Initialize OLED display (high-level API)
+ * @return 1:OK, 0:FAIL
+ */
+uint8_t fm_api_oled_init(void);
+
+/**
+ * @brief Write string to OLED display (high-level API)
+ * @param str String buffer
+ * @param iSize Buffer size including null terminator
+ * @param uxPosition X position
+ * @param uyPosition Y position
+ * @param uFont Font enum (FONT_7_X_10_PIXELS, FONT_11_X_18_PIXELS, FONT_16_X_26_PIXELS)
+ */
+void fm_api_oled_write(char* str, int iSize, uint16_t uxPosition, uint16_t uyPosition, uint8_t uFont);
+
+/**
+ * @brief Clear OLED display (high-level API)
+ */
+void fm_api_oled_clear(void);
+
+/**
+ * @brief Update OLED screen (high-level API)
+ */
+void fm_api_oled_update_screen(void);
 
 /* C++ detection */
 #ifdef __cplusplus

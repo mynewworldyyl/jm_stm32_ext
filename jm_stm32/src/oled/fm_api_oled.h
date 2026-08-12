@@ -48,12 +48,12 @@ enum {
  * 								fm_api_oled_init
  * Description: Init Oled Display
  * Parameters: Don't have
- * Return: Don't have
+ * Return: 0=fail, 1=ok
  * Author: Filipe Mesel Lobo Costa Cardoso <lipemesel@hotmail.com>
  * Version: v1.0
  * Date: 04/02/2023
  *------------------------------------------------------------------------------*/
-void fm_api_oled_init();
+uint8_t fm_api_oled_init();
 
 /*-------------------------------------------------------------------------------
  * 								fm_api_oled_write

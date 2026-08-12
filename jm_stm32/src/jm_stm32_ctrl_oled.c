@@ -9,6 +9,8 @@
 #include "jm_stm32.h"
 #include "jm_stm32_com.h"
 #include "oled/fm_api_oled.h"
+#include "oled/ssd1306.h"
+#include "oled/fonts.h"
 
 #if JM_OLED_ENABLE == 1
 
@@ -61,11 +63,36 @@ static void bin_to_str(uint32_t n, char *buf, int len) {
     buf[len] = '\0';
 }
 
+static FontDef_t* get_font(uint8_t id) {
+    switch (id) {
+        case 1: return &Font_11x18;
+        case 2: return &Font_16x26;
+        default: return &Font_7x10;
+    }
+}
+
+static uint8_t hex_val(char c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    return 0;
+}
+
+static int parse_hex_bitmap(const char *hex, uint8_t *out, int max_len) {
+    int hex_len = strlen(hex);
+    int out_len = 0;
+    int i;
+    for (i = 0; i < hex_len && out_len < max_len; i += 2) {
+        if (i + 1 >= hex_len) break;
+        out[out_len++] = (hex_val(hex[i]) << 4) | hex_val(hex[i + 1]);
+    }
+    return out_len;
+}
+
 /**
  * @brief OLED 控制处理函数
  *
- * 处理从 ESP8266 下发的 OLED 操作命令，支持初始化、清屏、
- * 显示字符、字符串、数字等操作。
+ * 处理从 ESP8266 下发的 OLED 操作命令。
  *
  * @param ps 包含命令参数的 emap (op, l, c, ch, s, n, len 等)
  * @return 包含响应数据的 emap，调用者需释放
@@ -81,8 +108,8 @@ jm_emap_t *ctrl_remote_ctrlOled(jm_emap_t *ps) {
 
     switch (op) {
         case 1: {
-            fm_api_oled_init();
-            jm_emap_putInt(h, "status", 1, false);
+            uint8_t ok = fm_api_oled_init();
+            jm_emap_putInt(h, "status", ok ? 1 : 0, false);
             break;
         }
         case 2: {
@@ -155,6 +182,192 @@ jm_emap_t *ctrl_remote_ctrlOled(jm_emap_t *ps) {
             char buf[12];
             bin_to_str(n, buf, len);
             fm_api_oled_write(buf, len + 1, col, line, FONT_7_X_10_PIXELS);
+            jm_emap_putInt(h, "status", 1, false);
+            break;
+        }
+        case 9: {
+            SSD1306_UpdateScreen();
+            jm_emap_putInt(h, "status", 1, false);
+            break;
+        }
+        case 10: {
+            SSD1306_ToggleInvert();
+            jm_emap_putInt(h, "status", 1, false);
+            break;
+        }
+        case 11: {
+            uint8_t color = (uint8_t)jm_emap_getInt(ps, "color", 0);
+            SSD1306_Fill((SSD1306_COLOR_t)color);
+            jm_emap_putInt(h, "status", 1, false);
+            break;
+        }
+        case 12: {
+            uint16_t x = (uint16_t)jm_emap_getInt(ps, "x", 0);
+            uint16_t y = (uint16_t)jm_emap_getInt(ps, "y", 0);
+            uint8_t color = (uint8_t)jm_emap_getInt(ps, "color", 1);
+            SSD1306_DrawPixel(x, y, (SSD1306_COLOR_t)color);
+            jm_emap_putInt(h, "status", 1, false);
+            break;
+        }
+        case 13: {
+            uint16_t x = (uint16_t)jm_emap_getInt(ps, "x", 0);
+            uint16_t y = (uint16_t)jm_emap_getInt(ps, "y", 0);
+            SSD1306_GotoXY(x, y);
+            jm_emap_putInt(h, "status", 1, false);
+            break;
+        }
+        case 14: {
+            uint16_t x = (uint16_t)jm_emap_getInt(ps, "x", 0);
+            uint16_t y = (uint16_t)jm_emap_getInt(ps, "y", 0);
+            char ch = (char)jm_emap_getInt(ps, "ch", 0);
+            uint8_t font = (uint8_t)jm_emap_getInt(ps, "font", 0);
+            uint8_t color = (uint8_t)jm_emap_getInt(ps, "color", 1);
+            SSD1306_GotoXY(x, y);
+            SSD1306_Putc(ch, get_font(font), (SSD1306_COLOR_t)color);
+            jm_emap_putInt(h, "status", 1, false);
+            break;
+        }
+        case 15: {
+            uint16_t x0 = (uint16_t)jm_emap_getInt(ps, "x0", 0);
+            uint16_t y0 = (uint16_t)jm_emap_getInt(ps, "y0", 0);
+            uint16_t x1 = (uint16_t)jm_emap_getInt(ps, "x1", 0);
+            uint16_t y1 = (uint16_t)jm_emap_getInt(ps, "y1", 0);
+            uint8_t color = (uint8_t)jm_emap_getInt(ps, "color", 1);
+            SSD1306_DrawLine(x0, y0, x1, y1, (SSD1306_COLOR_t)color);
+            jm_emap_putInt(h, "status", 1, false);
+            break;
+        }
+        case 16: {
+            uint16_t x = (uint16_t)jm_emap_getInt(ps, "x", 0);
+            uint16_t y = (uint16_t)jm_emap_getInt(ps, "y", 0);
+            uint16_t w = (uint16_t)jm_emap_getInt(ps, "w", 10);
+            uint16_t ht = (uint16_t)jm_emap_getInt(ps, "h", 10);
+            uint8_t color = (uint8_t)jm_emap_getInt(ps, "color", 1);
+            SSD1306_DrawRectangle(x, y, w, ht, (SSD1306_COLOR_t)color);
+            jm_emap_putInt(h, "status", 1, false);
+            break;
+        }
+        case 17: {
+            uint16_t x = (uint16_t)jm_emap_getInt(ps, "x", 0);
+            uint16_t y = (uint16_t)jm_emap_getInt(ps, "y", 0);
+            uint16_t w = (uint16_t)jm_emap_getInt(ps, "w", 10);
+            uint16_t ht = (uint16_t)jm_emap_getInt(ps, "h", 10);
+            uint8_t color = (uint8_t)jm_emap_getInt(ps, "color", 1);
+            SSD1306_DrawFilledRectangle(x, y, w, ht, (SSD1306_COLOR_t)color);
+            jm_emap_putInt(h, "status", 1, false);
+            break;
+        }
+        case 18: {
+            uint16_t x1 = (uint16_t)jm_emap_getInt(ps, "x1", 0);
+            uint16_t y1 = (uint16_t)jm_emap_getInt(ps, "y1", 0);
+            uint16_t x2 = (uint16_t)jm_emap_getInt(ps, "x2", 20);
+            uint16_t y2 = (uint16_t)jm_emap_getInt(ps, "y2", 20);
+            uint16_t x3 = (uint16_t)jm_emap_getInt(ps, "x3", 40);
+            uint16_t y3 = (uint16_t)jm_emap_getInt(ps, "y3", 0);
+            uint8_t color = (uint8_t)jm_emap_getInt(ps, "color", 1);
+            SSD1306_DrawTriangle(x1, y1, x2, y2, x3, y3, (SSD1306_COLOR_t)color);
+            jm_emap_putInt(h, "status", 1, false);
+            break;
+        }
+        case 19: {
+            uint16_t x1 = (uint16_t)jm_emap_getInt(ps, "x1", 0);
+            uint16_t y1 = (uint16_t)jm_emap_getInt(ps, "y1", 0);
+            uint16_t x2 = (uint16_t)jm_emap_getInt(ps, "x2", 20);
+            uint16_t y2 = (uint16_t)jm_emap_getInt(ps, "y2", 20);
+            uint16_t x3 = (uint16_t)jm_emap_getInt(ps, "x3", 40);
+            uint16_t y3 = (uint16_t)jm_emap_getInt(ps, "y3", 0);
+            uint8_t color = (uint8_t)jm_emap_getInt(ps, "color", 1);
+            SSD1306_DrawFilledTriangle(x1, y1, x2, y2, x3, y3, (SSD1306_COLOR_t)color);
+            jm_emap_putInt(h, "status", 1, false);
+            break;
+        }
+        case 20: {
+            int16_t x0 = (int16_t)jm_emap_getInt(ps, "x", 64);
+            int16_t y0 = (int16_t)jm_emap_getInt(ps, "y", 32);
+            int16_t r = (int16_t)jm_emap_getInt(ps, "r", 10);
+            uint8_t color = (uint8_t)jm_emap_getInt(ps, "color", 1);
+            SSD1306_DrawCircle(x0, y0, r, (SSD1306_COLOR_t)color);
+            jm_emap_putInt(h, "status", 1, false);
+            break;
+        }
+        case 21: {
+            int16_t x0 = (int16_t)jm_emap_getInt(ps, "x", 64);
+            int16_t y0 = (int16_t)jm_emap_getInt(ps, "y", 32);
+            int16_t r = (int16_t)jm_emap_getInt(ps, "r", 10);
+            uint8_t color = (uint8_t)jm_emap_getInt(ps, "color", 1);
+            SSD1306_DrawFilledCircle(x0, y0, r, (SSD1306_COLOR_t)color);
+            jm_emap_putInt(h, "status", 1, false);
+            break;
+        }
+        case 22: {
+            int16_t x = (int16_t)jm_emap_getInt(ps, "x", 0);
+            int16_t y = (int16_t)jm_emap_getInt(ps, "y", 0);
+            int16_t w = (int16_t)jm_emap_getInt(ps, "w", 64);
+            int16_t ht = (int16_t)jm_emap_getInt(ps, "h", 64);
+            uint8_t color = (uint8_t)jm_emap_getInt(ps, "color", 1);
+            char *hex = jm_emap_getStr(ps, "s");
+            if (hex && strlen(hex) >= w * ht / 2) {
+                static uint8_t bmp[1024];
+                int blen = parse_hex_bitmap(hex, bmp, sizeof(bmp));
+                if (blen >= (w * ht / 8)) {
+                    SSD1306_DrawBitmap(x, y, bmp, w, ht, color);
+                    jm_emap_putInt(h, "status", 1, false);
+                } else {
+                    jm_emap_putInt(h, "code", 2, false);
+                    jm_emap_putStr(h, "msg", "bitmap too short", false, false);
+                }
+            } else {
+                jm_emap_putInt(h, "code", 3, false);
+                jm_emap_putStr(h, "msg", "Missing bitmap hex", false, false);
+            }
+            break;
+        }
+        case 23: {
+            uint8_t start_row = (uint8_t)jm_emap_getInt(ps, "start", 0);
+            uint8_t end_row = (uint8_t)jm_emap_getInt(ps, "end", 7);
+            SSD1306_ScrollRight(start_row, end_row);
+            jm_emap_putInt(h, "status", 1, false);
+            break;
+        }
+        case 24: {
+            uint8_t start_row = (uint8_t)jm_emap_getInt(ps, "start", 0);
+            uint8_t end_row = (uint8_t)jm_emap_getInt(ps, "end", 7);
+            SSD1306_ScrollLeft(start_row, end_row);
+            jm_emap_putInt(h, "status", 1, false);
+            break;
+        }
+        case 25: {
+            uint8_t start_row = (uint8_t)jm_emap_getInt(ps, "start", 0);
+            uint8_t end_row = (uint8_t)jm_emap_getInt(ps, "end", 7);
+            SSD1306_Scrolldiagright(start_row, end_row);
+            jm_emap_putInt(h, "status", 1, false);
+            break;
+        }
+        case 26: {
+            uint8_t start_row = (uint8_t)jm_emap_getInt(ps, "start", 0);
+            uint8_t end_row = (uint8_t)jm_emap_getInt(ps, "end", 7);
+            SSD1306_Scrolldiagleft(start_row, end_row);
+            jm_emap_putInt(h, "status", 1, false);
+            break;
+        }
+        case 27: {
+            SSD1306_Stopscroll();
+            jm_emap_putInt(h, "status", 1, false);
+            break;
+        }
+        case 28: {
+            uint8_t i = (uint8_t)jm_emap_getInt(ps, "i", 1);
+            SSD1306_InvertDisplay(i);
+            jm_emap_putInt(h, "status", 1, false);
+            break;
+        }
+        case 29: {
+            SSD1306_ON();
+            jm_emap_putInt(h, "status", 1, false);
+            break;
+        }
+        case 30: {
+            SSD1306_OFF();
             jm_emap_putInt(h, "status", 1, false);
             break;
         }

@@ -112,7 +112,7 @@ void jm_comp_loop(void) {
     jm_http_client_test_loop();
 #endif
 
-#if JM_STM32_TESTOLED_ENABLE
+#if JM_OLED_ENABLE && JM_STM32_TESTOLED_ENABLE
     jm_oled_test_loop();
 #endif
 
