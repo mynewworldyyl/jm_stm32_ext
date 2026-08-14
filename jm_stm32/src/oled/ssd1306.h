@@ -2,23 +2,23 @@
  * original author:  Tilen Majerle<tilen@majerle.eu>
  * modification for STM32f10x: Alexander Lutsai<s.lyra@ya.ru>
 
-   ----------------------------------------------------------------------
-   	Copyright (C) Alexander Lutsai, 2016
-    Copyright (C) Tilen Majerle, 2015
+    ----------------------------------------------------------------------
+    	Copyright (C) Alexander Lutsai, 2016
+     Copyright (C) Tilen Majerle, 2015
     
-    This program is free software: you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation, either version 3 of the License, or
-    any later version.
+     This program is free software: you can redistribute it and/or modify
+     it under the terms of the GNU General Public License as published by
+     the Free Software Foundation, either version 3 of the License, or
+     any later version.
+      
+     This program is distributed in the hope that it will be useful,
+     but WITHOUT ANY WARRANTY; without even the implied warranty of
+     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+     GNU General Public License for more details.
      
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-    
-    You should have received a copy of the GNU General Public License
-    along with this program.  If not, see <http://www.gnu.org/licenses/>.
-   ----------------------------------------------------------------------
+     You should have received a copy of the GNU General Public License
+     along with this program.  If not, see <http://www.gnu.org/licenses/>.
+    ----------------------------------------------------------------------
  */
 #ifndef SSD1306_H
 #define SSD1306_H 100
@@ -45,16 +45,21 @@ SCL        |PB6          |Serial clock line
 SDA        |PB7          |Serial data line
  */
 
-#include <stdint.h>
+#if defined(USE_HAL_UART)
+#include "stm32f1xx_hal.h"
+#else
+#include "stm32f1xx.h"
+#endif
+
 #include "fonts.h"
 
 #include "stdlib.h"
 #include "string.h"
 
 
-/* I2C address (7-bit address) */
+/* I2C address */
 #ifndef SSD1306_I2C_ADDR
-#define SSD1306_I2C_ADDR         0x3C
+#define SSD1306_I2C_ADDR         0x78
 //#define SSD1306_I2C_ADDR       0x7A
 #endif
 
@@ -200,6 +205,20 @@ void SSD1306_DrawFilledRectangle(uint16_t x, uint16_t y, uint16_t w, uint16_t h,
 void SSD1306_DrawTriangle(uint16_t x1, uint16_t y1, uint16_t x2, uint16_t y2, uint16_t x3, uint16_t y3, SSD1306_COLOR_t color);
 
 /**
+ * @brief  Draws filled triangle on LCD
+ * @note   @ref SSD1306_UpdateScreen() must be called after that in order to see updated LCD screen
+ * @param  x1: First coordinate X location. Valid input is 0 to SSD1306_WIDTH - 1
+ * @param  y1: First coordinate Y location. Valid input is 0 to SSD1306_HEIGHT - 1
+ * @param  x2: Second coordinate X location. Valid input is 0 to SSD1306_WIDTH - 1
+ * @param  y2: Second coordinate Y location. Valid input is 0 to SSD1306_HEIGHT - 1
+ * @param  x3: Third coordinate X location. Valid input is 0 to SSD1306_WIDTH - 1
+ * @param  y3: Third coordinate Y location. Valid input is 0 to SSD1306_HEIGHT - 1
+ * @param  c: Color to be used. This parameter can be a value of @ref SSD1306_COLOR_t enumeration
+ * @retval None
+ */
+void SSD1306_DrawFilledTriangle(uint16_t x1, uint16_t y1, uint16_t x2, uint16_t y2, uint16_t x3, uint16_t y3, SSD1306_COLOR_t color);
+
+/**
  * @brief  Draws circle to STM buffer
  * @note   @ref SSD1306_UpdateScreen() must be called after that in order to see updated LCD screen
  * @param  x: X location for center of circle. Valid input is 0 to SSD1306_WIDTH - 1
@@ -221,7 +240,6 @@ void SSD1306_DrawCircle(int16_t x0, int16_t y0, int16_t r, SSD1306_COLOR_t c);
  */
 void SSD1306_DrawFilledCircle(int16_t x0, int16_t y0, int16_t r, SSD1306_COLOR_t c);
 
-void SSD1306_DrawFilledTriangle(uint16_t x1, uint16_t y1, uint16_t x2, uint16_t y2, uint16_t x3, uint16_t y3, SSD1306_COLOR_t color);
 
 
 #ifndef ssd1306_I2C_TIMEOUT
@@ -294,40 +312,25 @@ void SSD1306_InvertDisplay (int i);
 
 
 
-
-
 // clear the display
 
 void SSD1306_Clear (void);
 
+// turn on/off the display
+
 void SSD1306_ON(void);
+
 void SSD1306_OFF(void);
 
+#if !defined(USE_HAL_UART)
 /**
- * @brief Initialize OLED display (high-level API)
- * @return 1:OK, 0:FAIL
+ * @brief  Check if SSD1306 is ready on I2C bus (CMSIS mode only)
+ * @param  address: I2C slave address
+ * @retval true if device responds, false otherwise
  */
-uint8_t fm_api_oled_init(void);
+bool ssd1306_I2C_IsDeviceReady(uint8_t address);
+#endif
 
-/**
- * @brief Write string to OLED display (high-level API)
- * @param str String buffer
- * @param iSize Buffer size including null terminator
- * @param uxPosition X position
- * @param uyPosition Y position
- * @param uFont Font enum (FONT_7_X_10_PIXELS, FONT_11_X_18_PIXELS, FONT_16_X_26_PIXELS)
- */
-void fm_api_oled_write(char* str, int iSize, uint16_t uxPosition, uint16_t uyPosition, uint8_t uFont);
-
-/**
- * @brief Clear OLED display (high-level API)
- */
-void fm_api_oled_clear(void);
-
-/**
- * @brief Update OLED screen (high-level API)
- */
-void fm_api_oled_update_screen(void);
 
 /* C++ detection */
 #ifdef __cplusplus

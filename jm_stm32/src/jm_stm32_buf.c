@@ -116,6 +116,14 @@ bool jm_buf_get_s8(jm_buf_t *buf, int8_t *val)
     return true;
 }
 
+bool jm_buf_get_char(jm_buf_t *buf, char *val)
+{
+    int8_t v;
+    if (!jm_buf_get_s8(buf, &v)) return false;
+    *val = (char)v;
+    return true;
+}
+
 bool jm_buf_get_bool(jm_buf_t *buf, bool *val)
 {
     if (!check_read_len(buf, 1)) return false;
@@ -147,6 +155,21 @@ bool jm_buf_get_s32(jm_buf_t *buf, int32_t *val)
            ((int32_t)buf->data[buf->rpos + 2] << 8) |
            buf->data[buf->rpos + 3];
     buf->rpos += 4;
+    return true;
+}
+
+bool jm_buf_get_s64(jm_buf_t *buf, int64_t *val)
+{
+    if (!check_read_len(buf, 8)) return false;
+    *val = ((int64_t)buf->data[buf->rpos] << 56) |
+           ((int64_t)buf->data[buf->rpos + 1] << 48) |
+           ((int64_t)buf->data[buf->rpos + 2] << 40) |
+           ((int64_t)buf->data[buf->rpos + 3] << 32) |
+           ((int64_t)buf->data[buf->rpos + 4] << 24) |
+           ((int64_t)buf->data[buf->rpos + 5] << 16) |
+           ((int64_t)buf->data[buf->rpos + 6] << 8) |
+           buf->data[buf->rpos + 7];
+    buf->rpos += 8;
     return true;
 }
 
@@ -238,6 +261,11 @@ bool jm_buf_put_s8(jm_buf_t *buf, int8_t val)
     return true;
 }
 
+bool jm_buf_put_char(jm_buf_t *buf, char val)
+{
+    return jm_buf_put_s8(buf, (int8_t)val);
+}
+
 bool jm_buf_put_bool(jm_buf_t *buf, bool val)
 {
     if (!check_write_len(buf, 1)) return false;
@@ -264,6 +292,20 @@ bool jm_buf_put_s16(jm_buf_t *buf, int16_t val)
 bool jm_buf_put_s32(jm_buf_t *buf, int32_t val)
 {
     if (!check_write_len(buf, 4)) return false;
+    buf->data[buf->wpos++] = (uint8_t)(val >> 24);
+    buf->data[buf->wpos++] = (uint8_t)(val >> 16);
+    buf->data[buf->wpos++] = (uint8_t)(val >> 8);
+    buf->data[buf->wpos++] = (uint8_t)(val & 0xFF);
+    return true;
+}
+
+bool jm_buf_put_s64(jm_buf_t *buf, int64_t val)
+{
+    if (!check_write_len(buf, 8)) return false;
+    buf->data[buf->wpos++] = (uint8_t)(val >> 56);
+    buf->data[buf->wpos++] = (uint8_t)(val >> 48);
+    buf->data[buf->wpos++] = (uint8_t)(val >> 40);
+    buf->data[buf->wpos++] = (uint8_t)(val >> 32);
     buf->data[buf->wpos++] = (uint8_t)(val >> 24);
     buf->data[buf->wpos++] = (uint8_t)(val >> 16);
     buf->data[buf->wpos++] = (uint8_t)(val >> 8);

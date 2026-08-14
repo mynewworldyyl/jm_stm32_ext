@@ -443,6 +443,9 @@ jm_emap_t *ctrl_remote_ctrlGpio(jm_emap_t *ps) {
  */
 void jm_gpio_init(void) {
     jm_ctrl_registFun(ctrl_remote_ctrlGpio, 53);
+#if JM_OLED_ENABLE==1
+    jm_oled_ctrl_init();
+#endif
 }
 
 #endif // JM_GPIO_CTRL_ENABLE==1

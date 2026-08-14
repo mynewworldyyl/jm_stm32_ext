@@ -162,11 +162,14 @@ void jm_http_client_test_loop(void) {
             g_btn_last_time = now;
             g_btn_triggered = 1;
 
+            /*
             JM_LOG_D("HTTP_TEST: button pressed, sending GET %s", HTTP_TEST_URL);
             int rc = jm_http_client_get(HTTP_TEST_URL, "Accept: text/plain");
             if (rc != JM_SUCCESS) {
                 JM_LOG_E("HTTP_TEST: send failed rc=%d", rc);
             }
+            */
+           jm_stm32_send_cardmem();
         }
     }
     if (state == 1) {

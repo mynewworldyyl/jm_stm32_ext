@@ -190,19 +190,21 @@ void jm_emap_release(jm_emap_t *map) {
 }
 
 /**
- * @brief 添加整数键值对到 emap
+ * @brief 添加整数键值对到 emap（内部接口，支持指定类型）
  * @param map     emap 容器
  * @param key     键名
  * @param val     整数值
+ * @param type    前缀类型标识（PREFIX_TYPE_*）
  * @param copyKey 是否复制 key 字符串
  * @return true 成功
  */
-bool jm_emap_putInt(jm_emap_t *map, const char *key, int32_t val, bool copyKey) {
+static bool _jm_emap_putIntWithType(jm_emap_t *map, const char *key, int64_t val, uint8_t type, bool copyKey) {
     if (!map || !key) return false;
     jm_emap_node_t *node = map->head;
     while (node) {
         if (strcmp(node->key, key) == 0) {
             node->ival = val;
+            node->type = type;
             return true;
         }
         node = node->next;
@@ -213,11 +215,24 @@ bool jm_emap_putInt(jm_emap_t *map, const char *key, int32_t val, bool copyKey) 
     node->copy_key = copyKey;
     node->ival = val;
     node->is_int = true;
+    node->type = type;
     node->sval = NULL;
     node->copy_val = false;
     node->next = map->head;
     map->head = node;
     return true;
+}
+
+/**
+ * @brief 添加整数键值对到 emap
+ * @param map     emap 容器
+ * @param key     键名
+ * @param val     整数值
+ * @param copyKey 是否复制 key 字符串
+ * @return true 成功
+ */
+bool jm_emap_putInt(jm_emap_t *map, const char *key, int32_t val, bool copyKey) {
+    return _jm_emap_putIntWithType(map, key, (int64_t)val, PREFIX_TYPE_INT, copyKey);
 }
 
 /**
@@ -248,6 +263,7 @@ bool jm_emap_putStr(jm_emap_t *map, const char *key, const char *val, bool needF
     node->key = copyKey ? strdup(key) : (char *)key;
     node->copy_key = copyKey;
     node->is_int = false;
+    node->type = PREFIX_TYPE_STRINGG;
     node->sval = (char *)val;
     node->copy_val = needFreeMem;
     node->next = map->head;
@@ -264,7 +280,55 @@ bool jm_emap_putStr(jm_emap_t *map, const char *key, const char *val, bool needF
  * @return true 成功
  */
 bool jm_emap_putByte(jm_emap_t *map, const char *key, int8_t val, bool copyKey) {
-    return jm_emap_putInt(map, key, (int32_t)val, copyKey);
+    return _jm_emap_putIntWithType(map, key, (int64_t)val, PREFIX_TYPE_BYTE, copyKey);
+}
+
+/**
+ * @brief 添加字符键值对到 emap
+ * @param map     emap 容器
+ * @param key     键名
+ * @param val     字符值
+ * @param copyKey 是否复制 key 字符串
+ * @return true 成功
+ */
+bool jm_emap_putChar(jm_emap_t *map, const char *key, char val, bool copyKey) {
+    return _jm_emap_putIntWithType(map, key, (int64_t)(int8_t)val, PREFIX_TYPE_CHAR, copyKey);
+}
+
+/**
+ * @brief 添加短整型（int16）键值对到 emap
+ * @param map     emap 容器
+ * @param key     键名
+ * @param val     短整型值
+ * @param copyKey 是否复制 key 字符串
+ * @return true 成功
+ */
+bool jm_emap_putShort(jm_emap_t *map, const char *key, int16_t val, bool copyKey) {
+    return _jm_emap_putIntWithType(map, key, (int64_t)val, PREFIX_TYPE_SHORTT_TYPE, copyKey);
+}
+
+/**
+ * @brief 添加布尔值键值对到 emap
+ * @param map     emap 容器
+ * @param key     键名
+ * @param val     布尔值
+ * @param copyKey 是否复制 key 字符串
+ * @return true 成功
+ */
+bool jm_emap_putBool(jm_emap_t *map, const char *key, bool val, bool copyKey) {
+    return _jm_emap_putIntWithType(map, key, (int64_t)(val ? 1 : 0), PREFIX_TYPE_BOOLEAN, copyKey);
+}
+
+/**
+ * @brief 添加长整型（int64）键值对到 emap
+ * @param map     emap 容器
+ * @param key     键名
+ * @param val     长整型值
+ * @param copyKey 是否复制 key 字符串
+ * @return true 成功
+ */
+bool jm_emap_putLong(jm_emap_t *map, const char *key, int64_t val, bool copyKey) {
+    return _jm_emap_putIntWithType(map, key, val, PREFIX_TYPE_LONG, copyKey);
 }
 
 /**
@@ -276,6 +340,57 @@ bool jm_emap_putByte(jm_emap_t *map, const char *key, int8_t val, bool copyKey) 
  */
 int8_t jm_emap_getByte(jm_emap_t *map, const char *key, int8_t def) {
     return (int8_t)jm_emap_getInt(map, key, (int32_t)def);
+}
+
+/**
+ * @brief 获取字符值
+ * @param map  emap 容器
+ * @param key  键名
+ * @param def  默认值
+ * @return 字符值
+ */
+char jm_emap_getChar(jm_emap_t *map, const char *key, char def) {
+    return (char)jm_emap_getInt(map, key, (int32_t)(int8_t)def);
+}
+
+/**
+ * @brief 获取短整型值
+ * @param map  emap 容器
+ * @param key  键名
+ * @param def  默认值
+ * @return 短整型值
+ */
+int16_t jm_emap_getShort(jm_emap_t *map, const char *key, int16_t def) {
+    return (int16_t)jm_emap_getInt(map, key, (int32_t)def);
+}
+
+/**
+ * @brief 获取布尔值
+ * @param map  emap 容器
+ * @param key  键名
+ * @param def  默认值
+ * @return 布尔值
+ */
+bool jm_emap_getBool(jm_emap_t *map, const char *key, bool def) {
+    return jm_emap_getInt(map, key, (int32_t)(def ? 1 : 0)) != 0;
+}
+
+/**
+ * @brief 获取长整型值
+ * @param map  emap 容器
+ * @param key  键名
+ * @param def  默认值
+ * @return 长整型值
+ */
+int64_t jm_emap_getLong(jm_emap_t *map, const char *key, int64_t def) {
+    jm_emap_node_t *node = map->head;
+    while (node) {
+        if (strcmp(node->key, key) == 0 && node->is_int) {
+            return node->ival;
+        }
+        node = node->next;
+    }
+    return def;
 }
 
 /**
@@ -348,8 +463,28 @@ bool jm_emap_encode(const jm_emap_t *map, jm_buf_t *buf) {
     while (node) {
         if (!jm_buf_write_string(buf, node->key, (uint16_t)strlen(node->key))) return false;
         if (node->is_int) {
-            if (!jm_buf_put_s8(buf, PREFIX_TYPE_INT)) return false;
-            if (!jm_buf_put_s32(buf, node->ival)) return false;
+            if (!jm_buf_put_s8(buf, (int8_t)node->type)) return false;
+            switch (node->type) {
+                case PREFIX_TYPE_BOOLEAN:
+                    if (!jm_buf_put_bool(buf, (bool)node->ival)) return false;
+                    break;
+                case PREFIX_TYPE_CHAR:
+                    if (!jm_buf_put_s8(buf, (int8_t)node->ival)) return false;
+                    break;
+                case PREFIX_TYPE_BYTE:
+                    if (!jm_buf_put_s8(buf, (int8_t)node->ival)) return false;
+                    break;
+                case PREFIX_TYPE_SHORTT_TYPE:
+                    if (!jm_buf_put_s16(buf, (int16_t)node->ival)) return false;
+                    break;
+                case PREFIX_TYPE_LONG:
+                    if (!jm_buf_put_s64(buf, node->ival)) return false;
+                    break;
+                case PREFIX_TYPE_INT:
+                default:
+                    if (!jm_buf_put_s32(buf, (int32_t)node->ival)) return false;
+                    break;
+            }
         } else {
             if (!jm_buf_put_s8(buf, PREFIX_TYPE_STRINGG)) return false;
             uint16_t sval_len = node->sval ? (uint16_t)strlen(node->sval) : 0;
@@ -367,7 +502,7 @@ bool jm_emap_encode(const jm_emap_t *map, jm_buf_t *buf) {
  * @return emap 指针（调用者需释放），失败返回 NULL
  */
 jm_emap_t *jm_emap_decode(const uint8_t *data, uint16_t len) {
-    if (!data || len < 4) return NULL;
+    if (!data || len < 4) {JM_LOG_M("MDN");return NULL;}
 
     jm_buf_t *buf = jm_buf_wrap_array(data, len);
     if (!buf) return NULL;
@@ -375,12 +510,14 @@ jm_emap_t *jm_emap_decode(const uint8_t *data, uint16_t len) {
     int8_t type = 0;
     if (!jm_buf_get_s8(buf, &type)) {
         jm_buf_release(buf);
+        JM_LOG_M("MTIN");
         return NULL;
     }
 
     jm_emap_t *map = jm_emap_create(0);
     if (!map) {
         jm_buf_release(buf);
+        JM_LOG_M("MCMF");
         return NULL;
     }
 
@@ -388,11 +525,13 @@ jm_emap_t *jm_emap_decode(const uint8_t *data, uint16_t len) {
     if (!jm_buf_get_s16(buf, &eleLen)) {
         jm_emap_release(map);
         jm_buf_release(buf);
+        JM_LOG_M("MGLE");
         return NULL;
     }
 
     if (eleLen <= 0) {
         jm_buf_release(buf);
+        JM_LOG_M("MIEL");
         return map;
     }
 
@@ -400,6 +539,7 @@ jm_emap_t *jm_emap_decode(const uint8_t *data, uint16_t len) {
     if (!jm_buf_get_s8(buf, &keyType)) {
         jm_emap_release(map);
         jm_buf_release(buf);
+        JM_LOG_M("MKE");
         return NULL;
     }
 
@@ -409,6 +549,7 @@ jm_emap_t *jm_emap_decode(const uint8_t *data, uint16_t len) {
         if (!key || flag <= 0) {
             jm_emap_release(map);
             jm_buf_release(buf);
+            JM_LOG_M("MIKE");
             return NULL;
         }
 
@@ -417,6 +558,7 @@ jm_emap_t *jm_emap_decode(const uint8_t *data, uint16_t len) {
             free(key);
             jm_emap_release(map);
             jm_buf_release(buf);
+             JM_LOG_M("MVE");
             return NULL;
         }
 
@@ -427,6 +569,7 @@ jm_emap_t *jm_emap_decode(const uint8_t *data, uint16_t len) {
                     free(key);
                     jm_emap_release(map);
                     jm_buf_release(buf);
+                    JM_LOG_M("MVEI");
                     return NULL;
                 }
                 jm_emap_putInt(map, key, val, true);
@@ -438,9 +581,58 @@ jm_emap_t *jm_emap_decode(const uint8_t *data, uint16_t len) {
                     free(key);
                     jm_emap_release(map);
                     jm_buf_release(buf);
+                     JM_LOG_M("MVEB");
                     return NULL;
                 }
-                jm_emap_putInt(map, key, (int32_t)val, true);
+                jm_emap_putByte(map, key, val, true);
+                break;
+            }
+            case PREFIX_TYPE_SHORTT_TYPE: {
+                int16_t val = 0;
+                if (!jm_buf_get_s16(buf, &val)) {
+                    free(key);
+                    jm_emap_release(map);
+                    jm_buf_release(buf);
+                    JM_LOG_M("MVESH");
+                    return NULL;
+                }
+                jm_emap_putShort(map, key, val, true);
+                break;
+            }
+            case PREFIX_TYPE_LONG: {
+                int64_t val = 0;
+                if (!jm_buf_get_s64(buf, &val)) {
+                    free(key);
+                    jm_emap_release(map);
+                    jm_buf_release(buf);
+                    JM_LOG_M("MVELG");
+                    return NULL;
+                }
+                jm_emap_putLong(map, key, val, true);
+                break;
+            }
+            case PREFIX_TYPE_BOOLEAN: {
+                bool val = false;
+                if (!jm_buf_get_bool(buf, &val)) {
+                    free(key);
+                    jm_emap_release(map);
+                    jm_buf_release(buf);
+                    JM_LOG_M("MVEBL");
+                    return NULL;
+                }
+                jm_emap_putBool(map, key, val, true);
+                break;
+            }
+            case PREFIX_TYPE_CHAR: {
+                char val = 0;
+                if (!jm_buf_get_char(buf, &val)) {
+                    free(key);
+                    jm_emap_release(map);
+                    jm_buf_release(buf);
+                    JM_LOG_M("MVECH");
+                    return NULL;
+                }
+                jm_emap_putChar(map, key, val, true);
                 break;
             }
             case PREFIX_TYPE_STRINGG: {
@@ -454,11 +646,13 @@ jm_emap_t *jm_emap_decode(const uint8_t *data, uint16_t len) {
                     free(key);
                     jm_emap_release(map);
                     jm_buf_release(buf);
+                     JM_LOG_M("MVES");
                     return NULL;
                 }
                 break;
             }
             default:
+                JM_LOG_M("MVNS=%d",type);
                 break;
         }
 
@@ -717,11 +911,11 @@ static void jm_parse_serial_packet(const uint8_t *payload, uint16_t payload_len)
     case JM_TASK_APP_PROXY_CTRL_CMD: {
         JM_LOG_D("ctrlCmd reqId=%u", req_id);
         uint16_t data_len = jm_buf_readable_len(buf);
-         //JM_LOG_D("dl=%u", data_len);
+         JM_LOG_D("dl=%u", data_len);
         if (data_len > 0) {
             const uint8_t *data = jm_buf_read_buf(buf);
 
-           // JM_LOG_D("dcb=%p", data);
+            //JM_LOG_D("dcb=%p", data);
             jm_emap_t *ps = jm_emap_decode(data, data_len);
             if (ps) {
                // JM_LOG_D("ivf");
@@ -734,11 +928,17 @@ static void jm_parse_serial_packet(const uint8_t *payload, uint16_t payload_len)
                     }
                     //  JM_LOG_D("1");
                     jm_emap_release(rst);
+                }else {
+                    JM_LOG_D("NRSt");
                 }
                 //  JM_LOG_D("2");
                 jm_emap_release(ps);
                  // JM_LOG_D("3");
+            }else {
+                JM_LOG_E("PS N");
             }
+        }else {
+            JM_LOG_E("Data N");
         }
         JM_LOG_D("ctrlE");
         break;
@@ -1588,6 +1788,11 @@ int jm_stm32_send_ctrl_event(const uint8_t *data, uint16_t len)
 {
     if (!data || len == 0) return JM_ERR_INVALID_PACKET;
     return jm_send_serial_packet(JM_TASK_APP_PROXY_CTRL_EVENT, 0, data, len);
+}
+
+int jm_stm32_send_cardmem()
+{
+    return jm_send_serial_packet(JM_TASK_APP_PROXY_MEMINFO, 0, NULL, 0);
 }
 
 

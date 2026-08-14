@@ -46,7 +46,7 @@
 #define JM_STM32_UDP_ENABLE 0
 
 /** @brief 简化 HTTP 客户端开关 */
-#define JM_HTTP_CLIENT_ENABLE 0
+#define JM_HTTP_CLIENT_ENABLE 1
 
 /** @brief OLED屏幕 */
 #define JM_OLED_ENABLE 1
@@ -66,7 +66,7 @@
 #define JM_MQTT_CLIENT_TEST_ENABLE 0
 
 /** @brief HTTP 客户端测试模块开关 */
-#define JM_HTTP_CLIENT_TEST_ENABLE 0
+#define JM_HTTP_CLIENT_TEST_ENABLE 1
 
  // 启用 OLED 测试
 #define JM_STM32_TESTOLED_ENABLE 1 

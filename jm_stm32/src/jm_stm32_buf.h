@@ -118,6 +118,13 @@ bool jm_buf_get_u8(jm_buf_t *buf, uint8_t *val);
  */
 bool jm_buf_get_s8(jm_buf_t *buf, int8_t *val);
 /**
+ * @brief 读取一个 char
+ * @param buf  缓冲区指针
+ * @param val  输出值
+ * @return true 成功
+ */
+bool jm_buf_get_char(jm_buf_t *buf, char *val);
+/**
  * @brief 读取一个 bool
  * @param buf  缓冲区指针
  * @param val  输出值
@@ -145,6 +152,13 @@ bool jm_buf_get_s16(jm_buf_t *buf, int16_t *val);
  * @return true 成功
  */
 bool jm_buf_get_s32(jm_buf_t *buf, int32_t *val);
+/**
+ * @brief 读取一个 int64（大端序）
+ * @param buf  缓冲区指针
+ * @param val  输出值
+ * @return true 成功
+ */
+bool jm_buf_get_s64(jm_buf_t *buf, int64_t *val);
 /**
  * @brief 读取一个 uint32（大端序）
  * @param buf  缓冲区指针
@@ -203,6 +217,13 @@ bool jm_buf_put_u8(jm_buf_t *buf, uint8_t val);
  */
 bool jm_buf_put_s8(jm_buf_t *buf, int8_t val);
 /**
+ * @brief 写入一个 char
+ * @param buf  缓冲区指针
+ * @param val  值
+ * @return true 成功
+ */
+bool jm_buf_put_char(jm_buf_t *buf, char val);
+/**
  * @brief 写入一个 bool
  * @param buf  缓冲区指针
  * @param val  值
@@ -230,6 +251,13 @@ bool jm_buf_put_s16(jm_buf_t *buf, int16_t val);
  * @return true 成功
  */
 bool jm_buf_put_s32(jm_buf_t *buf, int32_t val);
+/**
+ * @brief 写入一个 int64（大端序）
+ * @param buf  缓冲区指针
+ * @param val  值
+ * @return true 成功
+ */
+bool jm_buf_put_s64(jm_buf_t *buf, int64_t val);
 /**
  * @brief 写入一个 uint32（大端序）
  * @param buf  缓冲区指针

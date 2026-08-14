@@ -2,102 +2,35 @@
  * original author:  Tilen Majerle<tilen@majerle.eu>
  * modification for STM32f10x: Alexander Lutsai<s.lyra@ya.ru>
 
-   ----------------------------------------------------------------------
-   	Copyright (C) Alexander Lutsai, 2016
-    Copyright (C) Tilen Majerle, 2015
+    ----------------------------------------------------------------------
+    	Copyright (C) Alexander Lutsai, 2016
+     Copyright (C) Tilen Majerle, 2015
 
-    This program is free software: you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation, either version 3 of the License, or
-    any later version.
+     This program is free software: you can redistribute it and/or modify
+     it under the terms of the GNU General Public License as published by
+     the Free Software Foundation, either version 3 of the License, or
+     any later version.
 
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
+     This program is distributed in the hope that it will be useful,
+     but WITHOUT ANY WARRANTY; without even the implied warranty of
+     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+     GNU General Public License for more details.
 
-    You should have received a copy of the GNU General Public License
-    along with this program.  If not, see <http://www.gnu.org/licenses/>.
-   ----------------------------------------------------------------------
+     You should have received a copy of the GNU General Public License
+     along with this program.  If not, see <http://www.gnu.org/licenses/>.
+    ----------------------------------------------------------------------
  */
 #include "ssd1306.h"
 #include "jm_stm32.h"
+
+#if defined(USE_HAL_UART)
+#include "stm32f1xx_hal.h"
+extern I2C_HandleTypeDef hi2c1;
+#else
+#include "stm32f1xx.h"
 #include <stdbool.h>
-#include <stm32f1xx.h>
+#endif
 
-#include "jm_stm32.h"
-
-static void hw_i2c1_init(void) {
-    RCC->APB2ENR |= RCC_APB2ENR_IOPBEN;
-    RCC->APB1ENR |= RCC_APB1ENR_I2C1EN;
-    RCC->APB1RSTR |= RCC_APB1RSTR_I2C1RST;
-    RCC->APB1RSTR &= ~RCC_APB1RSTR_I2C1RST;
-
-    uint32_t crl = GPIOB->CRL;
-    crl &= ~((0xF << (6 * 4)) | (0xF << (7 * 4)));
-    crl |= ((0xF << (6 * 4)) | (0xF << (7 * 4)));
-    GPIOB->CRL = crl;
-
-    I2C1->CR1 = 0;
-    I2C1->CR2 = 36;
-    I2C1->CCR = 180;
-    I2C1->TRISE = 37;
-    I2C1->CR1 |= I2C_CR1_PE;
-}
-
-static bool hw_i2c1_wait_sr1(uint32_t flag, int timeout) {
-    while (timeout--) {
-        if (I2C1->SR1 & flag) return true;
-    }
-    return false;
-}
-
-static bool hw_i2c1_start(void) {
-    I2C1->CR1 |= I2C_CR1_START;
-    return hw_i2c1_wait_sr1(I2C_SR1_SB, 10000);
-}
-
-static void hw_i2c1_stop(void) {
-    I2C1->CR1 |= I2C_CR1_STOP;
-}
-
-static bool hw_i2c1_send_addr(uint8_t addr, bool read) {
-    I2C1->DR = (addr << 1) | (read ? 1 : 0);
-    if (!hw_i2c1_wait_sr1(I2C_SR1_ADDR, 10000)) return false;
-    (void)I2C1->SR1;
-    (void)I2C1->SR2;
-    return true;
-}
-
-static bool hw_i2c1_write_byte(uint8_t data) {
-    I2C1->DR = data;
-    return hw_i2c1_wait_sr1(I2C_SR1_TXE, 10000);
-}
-
-static void hw_i2c1_write_reg(uint8_t addr, uint8_t reg, uint8_t data) {
-    hw_i2c1_start();
-    hw_i2c1_send_addr(addr, false);
-    hw_i2c1_write_byte(reg);
-    hw_i2c1_write_byte(data);
-    hw_i2c1_stop();
-}
-
-static void hw_i2c1_write_multi(uint8_t addr, uint8_t reg, uint8_t *data, uint16_t count) {
-    hw_i2c1_start();
-    hw_i2c1_send_addr(addr, false);
-    hw_i2c1_write_byte(reg);
-    for (uint16_t i = 0; i < count; i++) {
-        hw_i2c1_write_byte(data[i]);
-    }
-    hw_i2c1_stop();
-}
-
-static bool hw_i2c1_device_ready(uint8_t addr) {
-    if (!hw_i2c1_start()) return false;
-    bool ready = hw_i2c1_send_addr(addr, false);
-    hw_i2c1_stop();
-    return ready;
-}
 /* Write command */
 #define SSD1306_WRITECOMMAND(command)      ssd1306_I2C_Write(SSD1306_I2C_ADDR, 0x00, (command))
 /* Write data */
@@ -233,27 +166,31 @@ void SSD1306_DrawBitmap(int16_t x, int16_t y, const unsigned char* bitmap, int16
 
 
 
-
-
-
 uint8_t SSD1306_Init(void) {
 
 	/* Init I2C */
 	ssd1306_I2C_Init();
 	
+#if defined(USE_HAL_UART)
 	/* Check if LCD connected to I2C */
-	if (!hw_i2c1_device_ready(SSD1306_I2C_ADDR)) {
+	if (HAL_I2C_IsDeviceReady(&hi2c1, SSD1306_I2C_ADDR, 1, 20000) != HAL_OK) {
 		/* Return false */
-		JM_LOG_D("I2C NReady addr=%x",SSD1306_I2C_ADDR);
 		return 0;
 	}
-	JM_LOG_D("I2C Ready");
+#else
+	/* Check if LCD connected to I2C (CMSIS mode) */
+	if (!ssd1306_I2C_IsDeviceReady(SSD1306_I2C_ADDR)) {
+		/* Return false */
+		JM_LOG_D("addr=%x",SSD1306_I2C_ADDR);
+		return 0;
+	}
+#endif
+	
 	/* A little delay */
 	uint32_t p = 2500;
 	while(p>0)
 		p--;
 	
-	JM_LOG_D("Init LCD");
 	/* Init LCD */
 	SSD1306_WRITECOMMAND(0xAE); //display off
 	SSD1306_WRITECOMMAND(0x20); //Set Memory Addressing Mode   
@@ -299,8 +236,7 @@ uint8_t SSD1306_Init(void) {
 	
 	/* Initialized OK */
 	SSD1306.Initialized = 1;
-
-	JM_LOG_D("Init OLED END");
+	
 	/* Return OK */
 	return 1;
 }
@@ -705,15 +641,108 @@ void SSD1306_OFF(void) {
 //
 /////////////////////////////////////////////////////////////////////////////////////////////////////////
 
+#if defined(USE_HAL_UART)
 void ssd1306_I2C_Init() {
-	hw_i2c1_init();
+	//MX_I2C1_Init();
+	uint32_t p = 250000;
+	while(p>0)
+		p--;
+}
+#else
+void ssd1306_I2C_Init() {
+	RCC->APB1ENR |= RCC_APB1ENR_I2C1EN;
+	RCC->APB2ENR |= RCC_APB2ENR_IOPBEN;
+	
+	/* PB6=SCL, PB7=SDA, AF open-drain */
+	GPIOB->CRL = (GPIOB->CRL & ~((0xF << 24) | (0xF << 28))) |
+	             (0xB << 24) | (0xB << 28);
+	GPIOB->ODR |= (1 << 6) | (1 << 7);
+	
+	I2C1->CR1 = I2C_CR1_SWRST;
+	I2C1->CR1 = 0;
+	I2C1->CR2 = 72;
+	I2C1->CCR = 360;
+	I2C1->TRISE = 73;
+	I2C1->CR1 |= I2C_CR1_PE;
+}
+#endif
+
+#if defined(USE_HAL_UART)
+void ssd1306_I2C_WriteMulti(uint8_t address, uint8_t reg, uint8_t* data, uint16_t count) {
+	uint8_t dt[256];
+	dt[0] = reg;
+	uint8_t i;
+	for(i = 0; i < count; i++)
+		dt[i+1] = data[i];
+	HAL_I2C_Master_Transmit(&hi2c1, address, dt, count+1, 10);
+}
+
+void ssd1306_I2C_Write(uint8_t address, uint8_t reg, uint8_t data) {
+	uint8_t dt[2];
+	dt[0] = reg;
+	dt[1] = data;
+	HAL_I2C_Master_Transmit(&hi2c1, address, dt, 2, 10);
+}
+
+#else
+static bool ssd1306_i2c_wait_sr1(uint32_t flag) {
+	int timeout = 20000;
+	while (!(I2C1->SR1 & flag)) {
+		if (--timeout <= 0) return false;
+	}
+	return true;
+}
+
+static bool ssd1306_i2c_start(void) {
+	I2C1->CR1 |= I2C_CR1_START;
+	if (!ssd1306_i2c_wait_sr1(I2C_SR1_SB)) return false;
+	(void)I2C1->SR1; /* Clear SB flag by reading SR1 then writing DR */
+	return true;
+}
+
+static void ssd1306_i2c_stop(void) {
+	I2C1->CR1 |= I2C_CR1_STOP;
+}
+
+static bool ssd1306_i2c_send_addr(uint8_t addr, bool read) {
+	/* SSD1306_I2C_ADDR (0x78) is already 7-bit addr << 1 */
+	I2C1->DR = addr | (read ? 1 : 0);
+	if (!ssd1306_i2c_wait_sr1(I2C_SR1_ADDR)) return false;
+	(void)I2C1->SR1; /* Clear ADDR flag by reading SR1... */
+	(void)I2C1->SR2; /* ...then reading SR2 */
+	return true;
+}
+
+static bool ssd1306_i2c_write_byte(uint8_t data) {
+	if (!ssd1306_i2c_wait_sr1(I2C_SR1_TXE)) return false;
+	I2C1->DR = data;
+	return true;
 }
 
 void ssd1306_I2C_WriteMulti(uint8_t address, uint8_t reg, uint8_t* data, uint16_t count) {
-	hw_i2c1_write_multi(address, reg, data, count);
+	if (!ssd1306_i2c_start()) return;
+	if (!ssd1306_i2c_send_addr(address, false)) { ssd1306_i2c_stop(); return; }
+	if (!ssd1306_i2c_write_byte(reg)) { ssd1306_i2c_stop(); return; }
+	for (uint16_t i = 0; i < count; i++) {
+		if (!ssd1306_i2c_write_byte(data[i])) { ssd1306_i2c_stop(); return; }
+	}
+	ssd1306_i2c_wait_sr1(I2C_SR1_TXE);
+	ssd1306_i2c_stop();
 }
-
 
 void ssd1306_I2C_Write(uint8_t address, uint8_t reg, uint8_t data) {
-	hw_i2c1_write_reg(address, reg, data);
+	if (!ssd1306_i2c_start()) return;
+	if (!ssd1306_i2c_send_addr(address, false)) { ssd1306_i2c_stop(); return; }
+	if (!ssd1306_i2c_write_byte(reg)) { ssd1306_i2c_stop(); return; }
+	if (!ssd1306_i2c_write_byte(data)) { ssd1306_i2c_stop(); return; }
+	ssd1306_i2c_wait_sr1(I2C_SR1_TXE);
+	ssd1306_i2c_stop();
 }
+
+bool ssd1306_I2C_IsDeviceReady(uint8_t address) {
+	if (!ssd1306_i2c_start()) return false;
+	if (!ssd1306_i2c_send_addr(address, false)) { ssd1306_i2c_stop(); return false; }
+	ssd1306_i2c_stop();
+	return true;
+}
+#endif

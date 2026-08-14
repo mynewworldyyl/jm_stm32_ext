@@ -116,6 +116,9 @@ extern "C" {
 /** @brief 引脚中断事件 */
 #define JM_TASK_APP_PROXY_NETCARD_INTERRUPT (32)
 
+/** @brief 网卡内存 */
+#define JM_TASK_APP_PROXY_MEMINFO (33)
+
 /* ===================== 错误码 ===================== */
 
 /** @brief 操作成功 */
@@ -176,6 +179,8 @@ extern "C" {
 #define PREFIX_TYPE_SHORTT_TYPE     -120  /**< 短整型（int16）类型 */
 #define PREFIX_TYPE_INT             -119  /**< 整型（int32）类型 */
 #define PREFIX_TYPE_LONG            -118  /**< 长整型类型 */
+#define PREFIX_TYPE_CHAR            -115  /**< 字符类型 */
+#define PREFIX_TYPE_BOOLEAN         -114  /**< 布尔类型 */
 #define PREFIX_TYPE_STRINGG         -113  /**< 字符串类型 */
 
 /* ===================== 日志接口 ===================== */
@@ -215,6 +220,12 @@ void jm_log_print(const char *format, ...);
 #define JM_LOG_E(format, ...) JM_LOG_LINE(format, ## __VA_ARGS__);
 #else
 #define JM_LOG_E(format, ...)
+#endif
+
+#if 1
+#define JM_LOG_M(format, ...) JM_LOG_LINE(format, ## __VA_ARGS__);
+#else
+#define JM_LOG_M(format, ...)
 #endif
 
 
@@ -318,9 +329,10 @@ typedef struct {
  */
 typedef struct jm_emap_node {
     char *key;                    /**< 键名 */
-    int32_t ival;                 /**< 整数值（当 is_int 为 true 时有效） */
+    int64_t ival;                /**< 整数值（当 is_int 为 true 时有效） */
     char *sval;                   /**< 字符串值（当 is_int 为 false 时有效） */
     bool is_int;                  /**< true 表示整数值，false 表示字符串值 */
+    uint8_t type;                 /**< 前缀类型标识（用于序列化） */
     bool copy_key;                /**< 是否需要释放 key 内存 */
     bool copy_val;                /**< 是否需要释放 sval 内存 */
     struct jm_emap_node *next;    /**< 下一个节点 */
@@ -416,6 +428,46 @@ bool jm_emap_putStr(jm_emap_t *map, const char *key, const char *val, bool needF
 bool jm_emap_putByte(jm_emap_t *map, const char *key, int8_t val, bool copyKey);
 
 /**
+ * @brief 添加字符（char）键值对
+ * @param map     emap 容器
+ * @param key     键名
+ * @param val     字符值
+ * @param copyKey 是否复制 key 字符串
+ * @return true 成功，false 失败
+ */
+bool jm_emap_putChar(jm_emap_t *map, const char *key, char val, bool copyKey);
+
+/**
+ * @brief 添加短整型（int16）键值对
+ * @param map     emap 容器
+ * @param key     键名
+ * @param val     短整型值
+ * @param copyKey 是否复制 key 字符串
+ * @return true 成功，false 失败
+ */
+bool jm_emap_putShort(jm_emap_t *map, const char *key, int16_t val, bool copyKey);
+
+/**
+ * @brief 添加布尔值键值对
+ * @param map     emap 容器
+ * @param key     键名
+ * @param val     布尔值
+ * @param copyKey 是否复制 key 字符串
+ * @return true 成功，false 失败
+ */
+bool jm_emap_putBool(jm_emap_t *map, const char *key, bool val, bool copyKey);
+
+/**
+ * @brief 添加长整型（int64）键值对
+ * @param map     emap 容器
+ * @param key     键名
+ * @param val     长整型值
+ * @param copyKey 是否复制 key 字符串
+ * @return true 成功，false 失败
+ */
+bool jm_emap_putLong(jm_emap_t *map, const char *key, int64_t val, bool copyKey);
+
+/**
  * @brief 获取整数值
  * @param map  emap 容器
  * @param key  键名
@@ -432,6 +484,42 @@ int32_t jm_emap_getInt(jm_emap_t *map, const char *key, int32_t def);
  * @return 字节值
  */
 int8_t jm_emap_getByte(jm_emap_t *map, const char *key, int8_t def);
+
+/**
+ * @brief 获取字符值
+ * @param map  emap 容器
+ * @param key  键名
+ * @param def  默认值
+ * @return 字符值
+ */
+char jm_emap_getChar(jm_emap_t *map, const char *key, char def);
+
+/**
+ * @brief 获取短整型值
+ * @param map  emap 容器
+ * @param key  键名
+ * @param def  默认值
+ * @return 短整型值
+ */
+int16_t jm_emap_getShort(jm_emap_t *map, const char *key, int16_t def);
+
+/**
+ * @brief 获取布尔值
+ * @param map  emap 容器
+ * @param key  键名
+ * @param def  默认值
+ * @return 布尔值
+ */
+bool jm_emap_getBool(jm_emap_t *map, const char *key, bool def);
+
+/**
+ * @brief 获取长整型值
+ * @param map  emap 容器
+ * @param key  键名
+ * @param def  默认值
+ * @return 长整型值
+ */
+int64_t jm_emap_getLong(jm_emap_t *map, const char *key, int64_t def);
 
 /**
  * @brief 获取字符串值
@@ -701,6 +789,8 @@ bool jm_stm32_unregisterPinInterrupt(uint16_t gpioNo);
  * @return true 成功
  */
 int jm_stm32_pinInterrupt(const uint16_t pin);
+
+int jm_stm32_send_cardmem();
 
 /* ===================== 组件管理 ===================== */
 

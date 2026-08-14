@@ -1,23 +1,23 @@
 /**
  * original author:  Tilen Majerle<tilen@majerle.eu>
  * modification for STM32f10x: Alexander Lutsai<s.lyra@ya.ru>
-   ----------------------------------------------------------------------
-   	Copyright (C) Alexander Lutsai, 2016
-    Copyright (C) Tilen Majerle, 2015
-    
-    This program is free software: you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation, either version 3 of the License, or
-    any later version.
+    ----------------------------------------------------------------------
+    	Copyright (C) Alexander Lutsai, 2016
+     Copyright (C) Tilen Majerle, 2015
      
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-    
-    You should have received a copy of the GNU General Public License
-    along with this program.  If not, see <http://www.gnu.org/licenses/>.
-   ----------------------------------------------------------------------
+     This program is free software: you can redistribute it and/or modify
+     it under the terms of the GNU General Public License as published by
+     the Free Software Foundation, either version 3 of the License, or
+     any later version.
+      
+     This program is distributed in the hope that it will be useful,
+     but WITHOUT ANY WARRANTY; without even the implied warranty of
+     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+     GNU General Public License for more details.
+     
+     You should have received a copy of the GNU General Public License
+     along with this program.  If not, see <http://www.gnu.org/licenses/>.
+    ----------------------------------------------------------------------
  */
 #ifndef FONTS_H
 #define FONTS_H 120
@@ -32,14 +32,19 @@ extern C {
  * Default fonts library. It is used in all LCD based libraries.
  *
  * \par Supported fonts
- * 
+ 
  * Currently, these fonts are supported:
  *  - 7 x 10 pixels
  *  - 11 x 18 pixels
  *  - 16 x 26 pixels
  */
-#include <stdint.h>
-#include <string.h>
+#if defined(USE_HAL_UART)
+#include "stm32f1xx_hal.h"
+#else
+#include "stm32f1xx.h"
+#include <stdbool.h>
+#endif
+#include "string.h"
 
 /**
  * @defgroup LIB_Typedefs
@@ -93,13 +98,13 @@ extern FontDef_t Font_16x26;
  * @}
  */
  
-/**
+ /**
  * @defgroup FONTS_Functions
  * @brief    Library functions
  * @{
  */
 
-/**
+ /**
  * @brief  Calculates string length and height in units of pixels depending on string and font used
  * @param  *str: String to be checked for length and height
  * @param  *SizeStruct: Pointer to empty @ref FONTS_SIZE_t structure where informations will be saved
@@ -111,12 +116,12 @@ char* FONTS_GetStringSize(char* str, FONTS_SIZE_t* SizeStruct, FontDef_t* Font);
 /**
  * @}
  */
- 
-/**
+  
+ /**
  * @}
  */
- 
-/**
+  
+ /**
  * @}
  */
 
@@ -124,6 +129,5 @@ char* FONTS_GetStringSize(char* str, FONTS_SIZE_t* SizeStruct, FontDef_t* Font);
 #ifdef __cplusplus
 }
 #endif
-
  
 #endif

@@ -1,68 +1,123 @@
 /**
- * @file jm_stm32_test_oled.c
- * @brief OLED 显示屏测试/示例模块
+ * @file jm_stm32_oled_test.c
+ * @brief OLED 显示测试/示例模块
  *
- * 本模块演示如何使用 jm_stm32 的 OLED 显示屏功能（基于 fm_api_oled）。
- * 通过调用 fm_api_oled 函数，可以在 OLED 屏幕上显示文字等内容。
+ * 本模块演示如何使用 jm_stm32 库驱动 SSD1306 OLED 显示屏，
+ * 在屏幕上显示 "JMicro" 字符串并绘制图形。
  *
  * @section 集成步骤
- * 1. 在 `jm_pcfg.h` 中启用 OLED 模块及本测试模块：
+ * 1. 在 `jm_pcfg.h` 中启用必要的模块：
  *    @code
- *    #define JM_OLED_ENABLE 1
- *    #define JM_STM32_TESTOLED_ENABLE 1  // 启用本测试模块
+ *    #define JM_OLED_ENABLE 1             // 必须启用 OLED 模块
+ *    #define JM_STM32_TESTOLED_ENABLE 1   // 启用本测试模块
  *    @endcode
  *
  * 2. 将本文件添加到工程源文件列表。
  *
- * 3. 在 `main.c` 的主循环中调用 `@ref jm_oled_test_loop`，
- *    以更新 OLED 显示内容。
+ * 3. 确保 `platformio.ini` 中包含 OLED 头文件路径：
+ *    @code
+ *    build_flags =
+ *        -I../jm_stm32/src/oled
+ *    @endcode
+ *
+ * 4. 系统初始化后自动调用 `jm_oled_test_init()`，
+ *    在主循环中调用 `jm_oled_test_loop()` 轮询。
+ *
+ * @section 硬件连接
+ * SSD1306 OLED   | STM32F103
+ * VCC           | 3.3V
+ * GND           | GND
+ * SCL           | PB6 (I2C1_SCL)
+ * SDA           | PB7 (I2C1_SDA)
  *
  * @section 使用说明
- * - 初始化时自动调用 `@ref jm_oled_test_init`，OLED 屏幕显示 "JMicrov"
- * - 主循环中调用 `@ref jm_oled_test_loop` 保持显示更新
+ * - 程序启动后 OLED 初始化并显示 "JMicro" 字样
+ * - 屏幕上同时显示当前的系统运行毫秒计数
+ * - 每秒刷新一次显示内容
  */
 
 #include "jm_stm32.h"
-#include "oled/fm_api_oled.h"
-
-#if defined(USE_HAL_UART)
-#include "stm32f1xx_hal.h"
-#endif
 
 #if JM_STM32_TESTOLED_ENABLE==1
+
+#include "ssd1306.h"
+#include "fonts.h"
+#include <stdio.h>
+
+/** @brief 刷新显示的间隔（毫秒） */
+#define OLED_TEST_REFRESH_MS 1000
+
+/** @brief 静态变量标记OLED是否已初始化 */
+static uint8_t oled_initialized = 0;
 
 /**
  * @brief OLED 测试模块初始化
  *
- * 初始化 OLED 显示屏并显示 "JMicrov"。
+ * 初始化 SSD1306 OLED，清屏并在屏幕上显示 "JMicro"。
  * 由 `jm_comp_init()` 在启用时自动调用。
+ *
+ * @param config jm_stm32 配置结构（用于获取系统时间回调）
  */
-void jm_oled_test_init(void) {
-    JM_LOG_D("jm_oled_test_init")
-    fm_api_oled_init();
-    JM_LOG_D("oled1");
-    fm_api_oled_clear();
-    JM_LOG_D("oled2");
-    fm_api_oled_write("JMicrov", 7, 1, 1, FONT_7_X_10_PIXELS);
-    JM_LOG_D("oled3");
+void jm_oled_test_init(const jm_config_t *config)
+{
+    (void)config;
+
+    /* 初始化 OLED */
+    uint8_t ret = SSD1306_Init();
+    if (ret == 0) {
+        JM_LOG_E("OLED init failed!");
+        return;
+    }
+
+    oled_initialized = 1;
+
+    /* 清屏 */
+    SSD1306_Fill(SSD1306_COLOR_BLACK);
+    SSD1306_UpdateScreen();
+
+    /* 显示标题 */
+    SSD1306_GotoXY(0, 0);
+    SSD1306_Puts("JMicro", &Font_11x18, SSD1306_COLOR_WHITE);
+
+    /* 显示副标题 */
+    SSD1306_GotoXY(0, 20);
+    SSD1306_Puts("OLED Test", &Font_7x10, SSD1306_COLOR_WHITE);
+
+    SSD1306_UpdateScreen();
+
+    JM_LOG_D("OLED test init done");
 }
 
 /**
  * @brief OLED 测试模块轮询
  *
- * 在主循环中周期性调用，用于更新 OLED 显示内容。
- * 当前保持显示不变，可按需扩展动态内容。
+ * 每隔 OLED_TEST_REFRESH_MS 毫秒刷新一次屏幕上的系统时间。
+ * 应在主循环中周期性调用。
  */
-void jm_oled_test_loop(void) {
+void jm_oled_test_loop(void)
+{
+    /*
+    if (!oled_initialized) return;
 
-   // static uint32_t cnt = 0;
-   // if (++cnt >= 50000) {
-        //JM_LOG_D("oled4");
-      //  cnt = 0;
-        //fm_api_oled_write("JMicrov", 7, 1, 1, FONT_7_X_10_PIXELS);
-        //HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);
-   // }
-    
+    static uint32_t last_ms = 0;
+    uint32_t now = jm_stm32_get_time();
+
+    if (now - last_ms >= OLED_TEST_REFRESH_MS) {
+        last_ms = now;
+
+      
+        char buf[32];
+        snprintf(buf, sizeof(buf), "Time: %lu ms", (unsigned long)now);
+
+        SSD1306_GotoXY(0, 40);
+        SSD1306_Puts("                ", &Font_7x10, SSD1306_COLOR_WHITE);
+        SSD1306_GotoXY(0, 40);
+        SSD1306_Puts(buf, &Font_7x10, SSD1306_COLOR_WHITE);
+        SSD1306_UpdateScreen();
+
+        JM_LOG_D("OLED display updated: %s", buf);
+    }
+    */
 }
 
 #endif // JM_STM32_TESTOLED_ENABLE==1

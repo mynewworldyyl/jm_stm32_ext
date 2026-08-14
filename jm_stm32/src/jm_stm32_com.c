@@ -20,15 +20,6 @@
 #include "jm_http_client.h"
 #endif
 
-#if JM_HTTP_CLIENT_TEST_ENABLE
-#include "demo/jm_stm32_http_client_test.h"
-#endif
-
-#if JM_OLED_ENABLE
-#include "oled/fm_api_oled.h"
-#endif
-
-
 /**
  * @brief 初始化所有启用的组件，根据实际需要在此增加模块的初始化入口
  * @param config jm_stm32 配置结构
@@ -66,16 +57,8 @@ void jm_comp_init(const jm_config_t *config) {
 #endif
 
 #if JM_STM32_TESTOLED_ENABLE
-    JM_LOG_LINE("oled_test_init");
-    jm_oled_test_init();//OLED测试模块初始化
-#endif
-
-#if JM_OLED_ENABLE
-    JM_LOG_LINE("oled_ctrl_init");
-    jm_oled_ctrl_init();
     JM_LOG_LINE("oled_init");
-    fm_api_oled_init();
-    JM_LOG_LINE("oled_init_done");
+    jm_oled_test_init(config);
 #endif
 
     JM_LOG_LINE("comp_init_end");
@@ -112,7 +95,7 @@ void jm_comp_loop(void) {
     jm_http_client_test_loop();
 #endif
 
-#if JM_OLED_ENABLE && JM_STM32_TESTOLED_ENABLE
+#if JM_STM32_TESTOLED_ENABLE
     jm_oled_test_loop();
 #endif
 

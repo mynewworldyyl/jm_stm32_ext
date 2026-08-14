@@ -151,14 +151,39 @@ void jm_mqtt_client_test_loop(void);
 
 /** =========================MQTT结束============================== */
 
-#if JM_STM32_TESTOLED_ENABLE==1 && JM_OLED_ENABLE==1
-void jm_oled_test_init(void);
-void jm_oled_test_loop(void);
-#endif //#if JM_STM32_TESTOLED_ENABLE==1
+/** =========================OLED开始============================== */
+#if JM_STM32_TESTOLED_ENABLE
 
-#if JM_OLED_ENABLE==1
+/**
+ * @brief OLED 测试模块初始化
+ * @param config jm_stm32 配置结构
+ */
+void jm_oled_test_init(const jm_config_t *config);
+
+/**
+ * @brief OLED 测试模块轮询
+ */
+void jm_oled_test_loop(void);
+
+#endif /* JM_STM32_TESTOLED_ENABLE */
+
+#if JM_OLED_ENABLE
+
+/**
+ * @brief OLED 显示控制命令处理函数
+ * @param ps 键值对参数 (op + 操作参数)
+ * @return 响应 emap
+ */
+jm_emap_t *ctrl_oled_display(jm_emap_t *ps);
+
+/**
+ * @brief OLED 控制模块初始化
+ * 注册 OLED 显示控制命令（defId=101）。
+ */
 void jm_oled_ctrl_init(void);
-#endif //#if JM_OLED_ENABLE==1
+
+#endif /* JM_OLED_ENABLE */
+/** =========================OLED结束============================== */
 
 #ifdef __cplusplus
 }
